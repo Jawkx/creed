@@ -82,12 +82,12 @@ const TAG_TONES: Record<string, "green" | "amber" | "red"> = {
   Durable: "green",
   Examples: "green",
   Current: "green",
+  Tight: "green",
   Generic: "amber",
   Thin: "amber",
   Surface: "amber",
   Wordy: "amber",
   Drifty: "amber",
-  Short: "red",
   Bloated: "red",
   Vague: "red",
   Empty: "red",
@@ -114,10 +114,15 @@ function TagPill({ label }: { label: string }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium leading-[1.2]",
+        "inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[11px] font-medium leading-[1.2]",
         TAG_TONE_CLASS[tone]
       )}
     >
+      {tone === "amber" ? (
+        <span aria-hidden className="font-mono text-[10px] leading-none opacity-70">
+          /
+        </span>
+      ) : null}
       {label}
     </span>
   );
@@ -166,7 +171,39 @@ export function QualityRing({
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
   const progress = Math.max(0, Math.min(100, score ?? 0));
-  const offset = circumference - (progress / 100) * circumference;
+  const target = score === undefined ? circumference * 0.72 : circumference - (progress / 100) * circumference;
+
+  // Drive the dash offset through state so the fill always replays when an
+  // analysis finishes. Deterministic scoring means a re-run usually returns the
+  // same number, and a CSS transition between two equal values never fires - so
+  // we paint the ring empty, then fill to the score on the next frame, giving a
+  // smooth sweep on every completion regardless of whether the score moved.
+  const [offset, setOffset] = useState(loading ? circumference : target);
+  const wasLoading = useRef(Boolean(loading));
+
+  useEffect(() => {
+    const justFinished = wasLoading.current && !loading;
+    wasLoading.current = Boolean(loading);
+
+    if (loading) {
+      setOffset(circumference);
+      return;
+    }
+    if (!justFinished) {
+      setOffset(target);
+      return;
+    }
+
+    setOffset(circumference);
+    let secondFrame = 0;
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => setOffset(target));
+    });
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      cancelAnimationFrame(secondFrame);
+    };
+  }, [loading, target, circumference]);
 
   return (
     <span className="relative inline-flex shrink-0" style={{ width: size, height: size }}>
@@ -188,7 +225,7 @@ export function QualityRing({
           strokeLinecap="round"
           strokeWidth={stroke}
           strokeDasharray={circumference}
-          strokeDashoffset={loading ? circumference : score === undefined ? circumference * 0.72 : offset}
+          strokeDashoffset={offset}
           style={{ transition: "stroke-dashoffset 680ms cubic-bezier(0.22, 1, 0.36, 1)" }}
         />
       </svg>

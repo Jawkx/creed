@@ -153,7 +153,6 @@ export function runFullQuality(args: FullRunArgs): Promise<FullRunResult> {
           sections: args.sections,
           force: args.force,
           readOnly: args.readOnly,
-          scope: "full",
         }),
       });
       const payload = (await response.json()) as FullRunResult & { error?: string };
@@ -195,6 +194,9 @@ export function runFullQuality(args: FullRunArgs): Promise<FullRunResult> {
 }
 
 type SectionRunArgs = {
+  // The whole file goes up so the model can judge this section in context
+  // (contradictions, overall fit); only `section` is re-scored server-side.
+  sections: CreedSection[];
   section: CreedSection;
   fingerprint: string;
 };
@@ -215,13 +217,14 @@ export function runSectionQuality(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          sections: [args.section],
+          sections: args.sections,
           force: true,
-          scope: "section",
+          targetSectionIds: [args.section.id],
         }),
       });
       const payload = (await response.json()) as {
         report?: CreedQualityReport;
+        creditBalanceUsd?: number | null;
         error?: string;
       };
 
@@ -229,20 +232,25 @@ export function runSectionQuality(
         throw new Error(payload.error || "Could not analyze this section.");
       }
 
-      const sectionReport = payload.report?.sections[0] ?? null;
-      if (sectionReport && report) {
-        // Splice the refreshed section into the cached overall report so any
-        // mounted screen sees the update without an extra round trip.
-        report = {
-          ...report,
-          sections: report.sections.map((entry) =>
-            entry.sectionId === sectionReport.sectionId ? sectionReport : entry
-          ),
-        };
+      // The server returns the full merged report (this section re-scored,
+      // the rest carried forward, overall recomputed). Adopt it whole so the
+      // headline stays in sync with the section that just changed.
+      if (payload.report) {
+        report = payload.report;
+        error = null;
       }
-      return sectionReport;
+      // Report the outcome so the shell toasts on success / low credits, the
+      // same as a full analysis.
+      recordOutcome({
+        ok: true,
+        message: null,
+        lowCredits: typeof payload.creditBalanceUsd === "number" && payload.creditBalanceUsd < LOW_BALANCE_USD,
+      });
+      return payload.report?.sections.find((entry) => entry.sectionId === args.section.id) ?? null;
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Could not analyze this section.";
+      const message = cause instanceof Error ? cause.message : "Could not analyze this section.";
+      error = message;
+      recordOutcome({ ok: false, message, lowCredits: false });
       throw cause;
     } finally {
       sectionRunning.delete(args.section.id);

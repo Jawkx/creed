@@ -385,21 +385,18 @@
 
 @keyframes creed-copy-cycle {
   0% {
-    background-color: #1f1f1a;
-  }
-  16.6% {
     background-color: #2563eb;
   }
-  33.3% {
+  20% {
     background-color: #059669;
   }
-  50% {
+  40% {
     background-color: #eab308;
   }
-  66.6% {
+  60% {
     background-color: #ea580c;
   }
-  83.3% {
+  80% {
     background-color: #dc2626;
   }
   100% {
@@ -410,7 +407,7 @@
 @media (prefers-reduced-motion: reduce) {
   .creed-copy-cycle {
     animation: none;
-    background-color: #1f1f1a;
+    background-color: #2563eb;
   }
 }
 

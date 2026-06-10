@@ -3,7 +3,21 @@ import "server-only";
 import type { CreedSection } from "@/lib/creed-data";
 import { buildVisibleCreedMarkdown } from "@/lib/creed-data";
 
-export const CREED_QUALITY_RUBRIC_VERSION = "2026-05-07-personal-profile-v4";
+export const CREED_QUALITY_RUBRIC_VERSION = "2026-06-10-personal-profile-v5";
+
+// Score bands, coarsest-to-finest. The model picks a band first, then a number
+// inside it (band-then-number) so a one-point wobble stays inside the band. The
+// final number is pinned to the visible evidence (tags + gap) in
+// `lib/ai/quality.ts`; these ranges are what the model aims for, and they line
+// up with that evidence ladder.
+export const QUALITY_SCORE_BANDS = [
+  { key: "exceptional", min: 90, max: 100 },
+  { key: "strong", min: 78, max: 89 },
+  { key: "useful", min: 62, max: 77 },
+  { key: "thin", min: 40, max: 61 },
+  { key: "poor", min: 18, max: 39 },
+  { key: "risky", min: 0, max: 17 },
+] as const;
 
 const tagVocabulary = {
   green: [
@@ -13,6 +27,7 @@ const tagVocabulary = {
     ["Durable", "guidance that won't go stale fast"],
     ["Examples", "shows do/avoid examples"],
     ["Current", "live status / dates / next moves"],
+    ["Tight", "lean and curated, no padding"],
   ],
   amber: [
     ["Generic", "could apply to anyone, needs nuance"],
@@ -22,7 +37,6 @@ const tagVocabulary = {
     ["Drifty", "likely to age, add stale-by signal"],
   ],
   red: [
-    ["Short", "too sparse to steer agents"],
     ["Bloated", "too long / unfocused"],
     ["Vague", "language without anchor"],
     ["Empty", "placeholder or no real signal"],
@@ -35,12 +49,12 @@ const tagVocabulary = {
 } as const;
 
 const strictScoreBands = [
-  "95-100: exceptional. A future AI knows the user well, instantly, with minimal follow-up. Every section is specific, current, non-generic, and grounded in real details.",
-  "85-94: strong. Mostly profile-ready, but missing a few concrete examples, anchors, or up-to-date facts.",
-  "70-84: useful but incomplete. Structure exists, yet AI would still need to ask for things that should be on file.",
-  "50-69: thin. Some helpful facts, but too much generic language, stale context, or surface-level claims.",
-  "25-49: poor. Mostly placeholders, vague self-description, or empty scaffolding. AI gets little reliable signal about the user.",
-  "0-24: dangerous or misleading. Contradictory, stale, empty, or likely to make AI worse than no profile at all.",
+  "exceptional (90-100): nothing is holding it back - specific, anchored, current, tight, and it clearly changes how AI replies.",
+  "strong (78-89): well-anchored and useful, with one real gap or a touch of generic language.",
+  "useful (62-77): real signal, but a broken best practice (vague, no examples, stale) is dragging it.",
+  "thin (40-61): mostly generic or underwritten; little the AI can actually act on.",
+  "poor (18-39): placeholder or empty scaffolding.",
+  "risky (0-17): contradictory or stale enough to make AI worse than no profile at all.",
 ];
 
 const sectionStandards = [
@@ -56,39 +70,49 @@ const sectionStandards = [
   "Context: durable catch-all details (location, life stage, environment) that don't fit elsewhere.",
 ];
 
-const strictPenalties = [
-  "Never give a high score just for having all headings present.",
-  "Penalise generic personality claims, motivational language, and placeholder text heavily.",
-  "Penalise stale routines, abandoned goals, or facts that contradict each other.",
-  "Penalise sections that describe the user but don't actually change how AI should reply or behave.",
-  "Penalise vague phrases like 'thoughtful', 'driven', 'curious', 'authentic' unless grounded in a concrete example.",
-  "A section should rarely score above 80 without concrete details, anchors, or examples specific to this user.",
-  "Overall score should rarely exceed the weakest core section (Identity, Goals, Work, Preferences, Routines) by more than 12 points.",
-  "A profile with empty or near-empty core sections should almost never score above 74 overall.",
-  "Optional sections (Beliefs, Constraints, People, Health, Context) only count when they exist - don't penalise their absence, but penalise their presence if they're empty filler.",
+// The whole basis. Every section, core or custom, is judged on these five and
+// nothing else. We score how context is written, never what it is about.
+const bestPractices = [
+  "Specific: names real things (tools, people, numbers, dates, defaults), not language anyone could have written.",
+  "Anchored: claims come with an example, a rule, or a consequence, so AI knows how to act - not just what is true.",
+  "Steering: it would actually change how AI replies. This is the most important test.",
+  "Current: nothing stale, abandoned, or self-contradicting.",
+  "Tight: no padding or repetition - every line earns its place.",
 ];
 
-export function buildQualityPrompt(sections: CreedSection[]) {
+const scoringRules = [
+  "Judge craft, not subject. Any topic is welcome - never penalise a section for being niche, personal, or unusual. A section about LEGO is held to the exact same bar as one about work.",
+  "Never reward headings just for being present. An empty or filler section scores low even when every section exists.",
+  "Penalise generic personality claims and motivational language ('thoughtful', 'driven', 'curious', 'authentic') unless grounded in a concrete example.",
+  "Penalise stale routines, abandoned goals, and facts that contradict each other.",
+  "Penalise content that describes the user but would not change a single AI reply.",
+  "A section reaches the top band only when no best practice is broken and nothing meaningful is left to fix.",
+  "Optional sections only count once filled - never penalise their absence, but penalise hollow filler when present.",
+  "Custom sections set their own purpose; judge them on it. They can never be 'off-topic'.",
+];
+
+export function buildQualityPrompt(sections: CreedSection[], targetSectionIds: string[]) {
+  const targetSet = new Set(targetSectionIds);
+  const targets = sections.filter((section) => targetSet.has(section.id));
+  const bandKeys = QUALITY_SCORE_BANDS.map((band) => band.key).join(", ");
+
   return [
     `Rubric version: ${CREED_QUALITY_RUBRIC_VERSION}`,
     "You are a strict evaluator of creed.md files.",
     "creed.md is a personal context profile that every AI reads before talking to its owner.",
-    "Your job is to judge how well this profile lets a fresh AI know its owner. Be demanding.",
+    "Your job is to judge how well this profile lets a fresh AI know its owner. Be demanding and consistent: the same content must always earn the same score.",
     "",
-    "What a high-scoring profile must do:",
-    "- Give AI a clear, current picture of who the user is and what matters to them right now.",
-    "- Anchor every claim in concrete details, examples, names, dates, or specific defaults.",
-    "- Capture preferences, constraints, routines, people, and health/accessibility needs that change how AI should reply.",
-    "- Stay focused on durable facts about the user - not transcripts, recap, or moods of the day.",
+    "The five best practices (this is the whole basis - judge every section on these, and nothing else):",
+    ...bestPractices.map((item) => `- ${item}`),
     "",
     "Score bands:",
     ...strictScoreBands.map((item) => `- ${item}`),
     "",
-    "Section standards:",
+    "Section standards (what 'real signal' looks like per section - not a list of required topics):",
     ...sectionStandards.map((item) => `- ${item}`),
     "",
-    "Strict penalties:",
-    ...strictPenalties.map((item) => `- ${item}`),
+    "Scoring rules:",
+    ...scoringRules.map((item) => `- ${item}`),
     "",
     "Tag vocabulary (this is a closed set - pick zero to three per section, only from this list, mixing tones honestly):",
     "GREEN tags (celebrate):",
@@ -98,23 +122,27 @@ export function buildQualityPrompt(sections: CreedSection[]) {
     "RED tags (actively hurt agent usefulness):",
     ...tagVocabulary.red.map(([tag, hint]) => `- ${tag} - ${hint}`),
     "",
+    "Sections to score this run (return exactly one object in `sections` for each of these, and only these):",
+    ...targets.map((section) => `- ${section.name} (${section.id})`),
+    "Read every other section as context for contradictions and the overall judgment, but do not return a score object for any section not listed above.",
+    "",
     "Output rules:",
     "- Return JSON only. No markdown.",
+    `- For each scored section, first pick its band (one of: ${bandKeys}), then choose a \`score\` integer that sits inside that band's range. Band and score must agree.`,
     "- Per section: include 0–3 tags drawn ONLY from the vocabulary above. Skip tags entirely if nothing fits.",
     "- A weak section should usually carry 1–2 red/amber tags; an excellent section can be tag-less or only green.",
     "- `strength` is the single most-important thing this section gives agents. Omit (set null) if nothing is genuinely strong.",
-    "- `gap` is the single most-important missing or weak signal. Omit (null) if nothing meaningful to fix.",
+    "- `gap` is the one thing keeping this section from full marks. It is REQUIRED for any score below 90. Only a genuinely flawless section (90+) may set it null.",
     "- Each note has a `title` (2–5 words, sentence case, no trailing period) and a `detail` (one sentence, ≤22 words, specific to THIS Creed - never templated).",
     "- Keep `focus` as one crisp action sentence.",
-    "- Strengths/gaps arrays may stay (≤3 each) for completeness but the UI uses `strength` and `gap` first.",
+    "- `overall` judges the WHOLE profile (every section, not only the ones scored this run). Do not return an overall score - it is computed from the section scores.",
     "- Generated prose should be specific to this Creed, not templated.",
     "",
     "JSON shape:",
     JSON.stringify(
       {
         overall: {
-          score: 64,
-          summary: "Strict one-line judgment.",
+          summary: "Strict one-line judgment of the whole profile.",
           tags: ["Generic", "Thin"],
           strength: {
             title: "Clear daily routines",
@@ -124,13 +152,11 @@ export function buildQualityPrompt(sections: CreedSection[]) {
             title: "Goals stuck in vague mode",
             detail: "Goals are aspirational but lack concrete outcomes or stale-by signals so AI can't pull on them.",
           },
-          strengths: ["Concrete routines"],
-          gaps: ["Vague goals", "Empty Preferences"],
-          focus: ["Sharpen Goals with one concrete near-term outcome and a stale-by hint."],
         },
         sections: [
           {
             sectionId: "identity",
+            band: "thin",
             score: 58,
             tags: ["Vague", "No examples"],
             strength: {
@@ -141,10 +167,6 @@ export function buildQualityPrompt(sections: CreedSection[]) {
               title: "Missing defining traits",
               detail: "Describes the user without showing the values or defaults that should change AI replies.",
             },
-            reasons: ["Useful but vague"],
-            strengths: ["Clear role"],
-            gaps: ["No defining traits"],
-            missingContext: ["Concrete examples of taste"],
             focus: "Add one or two values or defaults AI should anchor every reply on.",
           },
         ],
@@ -153,7 +175,7 @@ export function buildQualityPrompt(sections: CreedSection[]) {
       2
     ),
     "",
-    "Visible markdown:",
+    "Visible markdown (the full profile, for context):",
     buildVisibleCreedMarkdown(sections),
     "",
     "Section ids and names:",
@@ -163,4 +185,62 @@ export function buildQualityPrompt(sections: CreedSection[]) {
       2
     ),
   ].join("\n");
+}
+
+// The response_format passed to OpenRouter so the model must return a
+// schema-valid object. This is what stops dropped sections, truncated JSON,
+// and shape drift - the three things that made the old free-form parse flaky.
+export function buildQualityResponseFormat(): Record<string, unknown> {
+  const note = {
+    type: ["object", "null"],
+    properties: {
+      title: { type: "string" },
+      detail: { type: "string" },
+    },
+    required: ["title", "detail"],
+    additionalProperties: false,
+  };
+
+  return {
+    type: "json_schema",
+    json_schema: {
+      name: "creed_quality_report",
+      strict: true,
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["overall", "sections"],
+        properties: {
+          overall: {
+            type: "object",
+            additionalProperties: false,
+            required: ["summary", "tags", "strength", "gap"],
+            properties: {
+              summary: { type: "string" },
+              tags: { type: "array", items: { type: "string" } },
+              strength: note,
+              gap: note,
+            },
+          },
+          sections: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["sectionId", "band", "score", "tags", "strength", "gap", "focus"],
+              properties: {
+                sectionId: { type: "string" },
+                band: { type: "string", enum: QUALITY_SCORE_BANDS.map((band) => band.key) },
+                score: { type: "integer" },
+                tags: { type: "array", items: { type: "string" } },
+                strength: note,
+                gap: note,
+                focus: { type: "string" },
+              },
+            },
+          },
+        },
+      },
+    },
+  };
 }

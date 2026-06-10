@@ -1,10 +1,21 @@
 import "server-only";
 import { createHash } from "node:crypto";
-import type { CreedSection } from "@/lib/creed-data";
+import {
+  GOALS_SECTION_ID,
+  IDENTITY_SECTION_ID,
+  PREFERENCES_SECTION_ID,
+  ROUTINES_SECTION_ID,
+  WORK_SECTION_ID,
+  type CreedSection,
+} from "@/lib/creed-data";
 import { callOpenRouter, parseJsonObject } from "@/lib/ai/openrouter";
 import { recordAiUsage } from "@/lib/ai/persistence";
 import { deductCredits, resolveAiCredential } from "@/lib/ai/credits";
-import { buildQualityPrompt, CREED_QUALITY_RUBRIC_VERSION } from "@/lib/ai/quality-rubric";
+import {
+  buildQualityPrompt,
+  buildQualityResponseFormat,
+  CREED_QUALITY_RUBRIC_VERSION,
+} from "@/lib/ai/quality-rubric";
 import { log } from "@/lib/observability";
 
 import type { SupabaseLikeClient } from "@/lib/supabase/types";
@@ -53,6 +64,7 @@ export const QUALITY_TAG_VOCAB = {
     "Durable",
     "Examples",
     "Current",
+    "Tight",
   ],
   amber: [
     "Generic",
@@ -62,7 +74,6 @@ export const QUALITY_TAG_VOCAB = {
     "Drifty",
   ],
   red: [
-    "Short",
     "Bloated",
     "Vague",
     "Empty",
@@ -79,6 +90,9 @@ const ALL_TAGS = new Set<string>([
   ...QUALITY_TAG_VOCAB.amber,
   ...QUALITY_TAG_VOCAB.red,
 ]);
+
+const RED_TAGS = new Set<string>(QUALITY_TAG_VOCAB.red);
+const AMBER_TAGS = new Set<string>(QUALITY_TAG_VOCAB.amber);
 
 const QUALITY_HASH_IGNORED_KEYS = new Set([
   "lastEditedAt",
@@ -117,6 +131,73 @@ function clampScore(value: unknown) {
   }
 
   return Math.max(0, Math.min(100, Math.round(numeric)));
+}
+
+// The visible evidence (the tags, and whether a gap is named) pins the allowed
+// score, so the number can never disagree with what the popover shows. A red
+// tag means a best practice is broken; an amber tag or a named gap means
+// something is still missing; nothing flagged and no gap means the section is
+// genuinely complete and must land in the top band.
+function evidenceRange(tags: string[], hasGap: boolean): [number, number] {
+  const reds = tags.filter((tag) => RED_TAGS.has(tag)).length;
+  const ambers = tags.filter((tag) => AMBER_TAGS.has(tag)).length;
+  if (reds >= 2) return [0, 61];
+  if (reds === 1) return [0, 77];
+  if (ambers >= 1 || hasGap) return [0, 89];
+  return [90, 100];
+}
+
+// Last-resort gap so a sub-90 section always tells the user what is costing it
+// points. The rubric requires the model to supply a real, specific gap; this
+// only fires if it flagged the section yet named no gap.
+function fallbackGapFromTags(tags: string[]): QualityNote | null {
+  const flagged = tags.find((tag) => RED_TAGS.has(tag)) ?? tags.find((tag) => AMBER_TAGS.has(tag));
+  if (!flagged) {
+    return null;
+  }
+  return {
+    title: "Held back",
+    detail: `Flagged "${flagged}"; resolve that to lift the score.`,
+  };
+}
+
+// The five always-on core sections. The overall score is computed from these
+// (weighted) rather than asked of the model, so the headline can never drift
+// from the section scores underneath it.
+const CORE_SECTION_IDS = new Set<string>([
+  IDENTITY_SECTION_ID,
+  GOALS_SECTION_ID,
+  WORK_SECTION_ID,
+  PREFERENCES_SECTION_ID,
+  ROUTINES_SECTION_ID,
+]);
+
+// Deterministic overall score: strong essentials are the floor, good extra
+// context is the climb. A flawless core alone tops out around 90; rich,
+// well-written non-core sections (optional or custom) lift it toward 100. Weak
+// extras never drag the headline, so trying new context is never punished, and
+// a hollow core caps the whole file. So 95-100 needs a strong core AND rich
+// additional context.
+function computeOverallScore(sections: Array<{ sectionId: string; score: number }>) {
+  if (!sections.length) {
+    return 0;
+  }
+
+  const coreScores = sections.filter((section) => CORE_SECTION_IDS.has(section.sectionId)).map((section) => section.score);
+  if (!coreScores.length) {
+    // No core sections present (unusual): fall back to a plain average.
+    return clampScore(sections.reduce((sum, section) => sum + section.score, 0) / sections.length);
+  }
+
+  const coreAvg = coreScores.reduce((sum, value) => sum + value, 0) / coreScores.length;
+  if (Math.min(...coreScores) < 40) {
+    return clampScore(Math.min(coreAvg, 70));
+  }
+
+  const base = Math.min(coreAvg, 90);
+  const extras = sections.filter((section) => !CORE_SECTION_IDS.has(section.sectionId) && section.score >= 70);
+  const lift = Math.min(10, extras.reduce((sum, section) => sum + (section.score - 70) / 30, 0) * 4);
+  return clampScore(base + lift);
 }
 
 function normalizeStringArray(value: unknown, fallback: string[]) {
@@ -185,85 +266,166 @@ function deriveLegacyNote(items: string[] | undefined, fallbackTitle: string): Q
   };
 }
 
-export function validateQualityReport(value: unknown, sections: CreedSection[], contentHash: string): CreedQualityReport {
-  const root = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
-  const overall = root.overall && typeof root.overall === "object" ? (root.overall as Record<string, unknown>) : {};
-  const rawSections = Array.isArray(root.sections) ? root.sections : [];
+type SectionReport = CreedQualityReport["sections"][number];
 
-  const sectionReports = sections.map((section) => {
-    const raw =
-      rawSections.find(
-        (item) =>
-          item &&
-          typeof item === "object" &&
-          (item as Record<string, unknown>).sectionId === section.id
-      ) as Record<string, unknown> | undefined;
+// The whole-file qualitative judgment (everything on `overall` except the
+// computed score). Shared by the model-parse path and the carry-forward path.
+type OverallQualitative = {
+  summary: string;
+  tags: string[];
+  strength: QualityNote | null;
+  gap: QualityNote | null;
+  strengths: string[];
+  gaps: string[];
+};
 
-    const strengths = normalizeStringArray(raw?.strengths, []).slice(0, 3);
-    const gaps = normalizeStringArray(
-      raw?.gaps,
-      raw?.missingContext ? normalizeStringArray(raw.missingContext, []) : []
-    ).slice(0, 3);
+// Normalize one section's raw model/stored payload into a section report.
+// `raw === undefined` (a section the model skipped, or one with no stored
+// entry) yields a neutral fallback the caller can choose to override with a
+// carried-forward score instead of showing a phantom zero.
+function normalizeSectionReport(raw: Record<string, unknown> | undefined, section: CreedSection): SectionReport {
+  const strengths = normalizeStringArray(raw?.strengths, []).slice(0, 3);
+  const gaps = normalizeStringArray(
+    raw?.gaps,
+    raw?.missingContext ? normalizeStringArray(raw.missingContext, []) : []
+  ).slice(0, 3);
 
-    const strength =
-      normalizeNote(raw?.strength) ?? deriveLegacyNote(strengths, "Worth keeping");
-    const gap =
-      normalizeNote(raw?.gap) ?? deriveLegacyNote(gaps, "Needs work");
+  const tags = normalizeTags(raw?.tags);
+  const strength = normalizeNote(raw?.strength) ?? deriveLegacyNote(strengths, "Worth keeping");
+  let gap = normalizeNote(raw?.gap) ?? deriveLegacyNote(gaps, "Needs work");
 
-    return {
-      sectionId: section.id,
-      sectionName: section.name,
-      score: clampScore(raw?.score ?? 0),
-      tags: normalizeTags(raw?.tags),
-      strength,
-      gap,
-      reasons: normalizeStringArray(raw?.reasons, ["Needs a clearer signal that helps future AI know you."]).slice(0, 3),
-      strengths,
-      gaps,
-      missingContext: normalizeStringArray(raw?.missingContext, []).slice(0, 3),
-      focus:
-        typeof raw?.focus === "string" && raw.focus.trim()
-          ? raw.focus.trim()
-          : "Make this section more specific, current, and grounded in concrete details about you.",
-    };
-  });
+  // The evidence decides the band; the model's number only places it within.
+  const [lo, hi] = evidenceRange(tags, gap !== null);
+  const score = Math.max(lo, Math.min(hi, clampScore(raw?.score ?? 0)));
 
-  const overallStrengthsArr = normalizeStringArray(overall.strengths, [
-    "The profile has a clear personal-context structure.",
-  ]).slice(0, 4);
-  const overallGapsArr = normalizeStringArray(overall.gaps, [
-    "Some sections need sharper, more specific personal detail.",
-  ]).slice(0, 4);
+  // Gap is mandatory below 90. If the model flagged the section but named no
+  // gap, surface one from the flag so the popover always explains the score.
+  if (!gap && score < 90) {
+    gap = fallbackGapFromTags(tags);
+  }
+
+  return {
+    sectionId: section.id,
+    sectionName: section.name,
+    score,
+    tags,
+    strength,
+    gap,
+    reasons: normalizeStringArray(raw?.reasons, ["Needs a clearer signal that helps future AI know you."]).slice(0, 3),
+    strengths,
+    gaps,
+    missingContext: normalizeStringArray(raw?.missingContext, []).slice(0, 3),
+    focus:
+      typeof raw?.focus === "string" && raw.focus.trim()
+        ? raw.focus.trim()
+        : "Make this section more specific, current, and grounded in concrete details about you.",
+  };
+}
+
+function parseOverallQualitative(value: unknown): OverallQualitative {
+  const overall = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const strengths = normalizeStringArray(overall.strengths, []).slice(0, 4);
+  const gaps = normalizeStringArray(overall.gaps, []).slice(0, 4);
+
+  return {
+    summary:
+      typeof overall.summary === "string" && overall.summary.trim()
+        ? overall.summary.trim()
+        : "The profile has useful structure but needs sharper, more specific personal context.",
+    tags: normalizeTags(overall.tags),
+    strength: normalizeNote(overall.strength) ?? deriveLegacyNote(strengths, "Working well"),
+    gap: normalizeNote(overall.gap) ?? deriveLegacyNote(gaps, "Biggest gap"),
+    strengths,
+    gaps,
+  };
+}
+
+// Build the final report from freshly graded sections, carrying forward prior
+// section reports for anything not graded this run, and computing the overall
+// score deterministically so it always agrees with its sections.
+function assembleReport({
+  sections,
+  gradedById,
+  priorById,
+  overall,
+  contentHash,
+}: {
+  sections: CreedSection[];
+  gradedById: Map<string, SectionReport>;
+  priorById: Map<string, SectionReport>;
+  overall: OverallQualitative;
+  contentHash: string;
+}): CreedQualityReport {
+  const sectionReports = sections.map(
+    (section) =>
+      gradedById.get(section.id) ?? priorById.get(section.id) ?? normalizeSectionReport(undefined, section)
+  );
 
   return {
     contentHash,
     overall: {
-      score: clampScore(overall.score ?? average(sectionReports.map((section) => section.score))),
-      summary:
-        typeof overall.summary === "string" && overall.summary.trim()
-          ? overall.summary.trim()
-          : "The profile has useful structure but needs sharper, more specific personal context.",
-      tags: normalizeTags(overall.tags),
-      strength:
-        normalizeNote(overall.strength) ?? deriveLegacyNote(overallStrengthsArr, "Working well"),
-      gap: normalizeNote(overall.gap) ?? deriveLegacyNote(overallGapsArr, "Biggest gap"),
-      strengths: overallStrengthsArr,
-      gaps: overallGapsArr,
-      focus: normalizeStringArray(overall.focus, [
-        "Tighten weak sections with concrete details, examples, or defaults specific to you.",
-      ]).slice(0, 5),
+      score: computeOverallScore(sectionReports),
+      summary: overall.summary,
+      tags: overall.tags,
+      strength: overall.strength,
+      gap: overall.gap,
+      strengths: overall.strengths,
+      gaps: overall.gaps,
+      focus: overall.gap ? [overall.gap.detail] : [],
     },
     sections: sectionReports,
     generatedAt: new Date().toISOString(),
   };
 }
 
-function average(values: number[]) {
-  if (!values.length) {
-    return 0;
-  }
+// Validate a stored (full-shape) report against the current sections. Used when
+// reading a persisted report (cache hit, baseline read, the MCP read path). The
+// model-response path uses `normalizeSectionReport` + `assembleReport` instead.
+export function validateQualityReport(value: unknown, sections: CreedSection[], contentHash: string): CreedQualityReport {
+  const root = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const rawOverall = root.overall && typeof root.overall === "object" ? (root.overall as Record<string, unknown>) : {};
+  const rawSections = Array.isArray(root.sections) ? root.sections : [];
 
-  return Math.round(values.reduce((total, value) => total + value, 0) / values.length);
+  const sectionReports = sections.map((section) =>
+    normalizeSectionReport(findRawSection(rawSections, section.id), section)
+  );
+  const overall = parseOverallQualitative(rawOverall);
+
+  return {
+    contentHash,
+    overall: {
+      // Always recomputed from the sections (which are themselves re-clamped to
+      // the evidence ladder), so the headline can never drift from its sections,
+      // even when reading an older stored report.
+      score: computeOverallScore(sectionReports),
+      summary: overall.summary,
+      tags: overall.tags,
+      strength: overall.strength,
+      gap: overall.gap,
+      strengths: overall.strengths,
+      gaps: overall.gaps,
+      focus: normalizeStringArray(rawOverall.focus, overall.gap ? [overall.gap.detail] : []).slice(0, 5),
+    },
+    sections: sectionReports,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+function findRawSection(rawSections: unknown[], sectionId: string) {
+  return rawSections.find(
+    (item) => item && typeof item === "object" && (item as Record<string, unknown>).sectionId === sectionId
+  ) as Record<string, unknown> | undefined;
+}
+
+function overallQualitativeFromReport(report: CreedQualityReport): OverallQualitative {
+  return {
+    summary: report.overall.summary,
+    tags: report.overall.tags,
+    strength: report.overall.strength,
+    gap: report.overall.gap,
+    strengths: report.overall.strengths,
+    gaps: report.overall.gaps,
+  };
 }
 
 async function readCachedReport(client: unknown, userId: string, contentHash: string) {
@@ -357,52 +519,155 @@ export async function readQualityBaseline({
   };
 }
 
+// Best-effort persist of the single per-user report row. The client already
+// has the report in the response, so a write hiccup must never fail (or
+// raw-toast) the analysis.
+async function persistQualityReport({
+  client,
+  userId,
+  reportWithHashes,
+  contentHash,
+  sectionHashes,
+  modelId,
+}: {
+  client: unknown;
+  userId: string;
+  reportWithHashes: CreedQualityReport & { sectionHashes: Record<string, string>; rubricVersion: string };
+  contentHash: string;
+  sectionHashes: Record<string, string>;
+  modelId: string;
+}) {
+  try {
+    const now = new Date().toISOString();
+    const db = client as SupabaseLikeClient;
+    const { error } = await db.from("creed_quality_reports").upsert(
+      {
+        user_id: userId,
+        content_hash: contentHash,
+        section_hashes: sectionHashes,
+        model_id: modelId,
+        report: reportWithHashes,
+        created_at: now,
+        updated_at: now,
+      },
+      { onConflict: "user_id" }
+    );
+    assertNoError(error, "Could not save quality report.");
+  } catch (cause) {
+    log.warn("quality_report_persist_failed", {
+      userId,
+      message: cause instanceof Error ? cause.message : String(cause),
+    });
+  }
+}
+
+// Analyze quality with one whole-file pass that is the single source of truth.
+// The model always sees the full profile (so cross-section judgment holds), but
+// only re-scores the sections that changed since the last analysis (or the
+// explicit `targetSectionIds`); unchanged sections carry their prior score
+// forward, and the overall score is computed deterministically from the result.
 export async function analyzeCreedQuality({
   client,
   userId,
   sections,
   force = false,
-  persist = true,
+  targetSectionIds,
 }: {
   client: unknown;
   userId: string;
   sections: CreedSection[];
   force?: boolean;
-  persist?: boolean;
+  targetSectionIds?: string[];
 }) {
   const contentHash = hashCreedSections(sections);
   const sectionHashes = hashCreedSectionsById(sections);
-  const cached = force ? null : await readCachedReport(client, userId, contentHash);
-  if (cached?.report) {
-    return {
-      report: cached.report,
+
+  if (!force) {
+    const cached = await readCachedReport(client, userId, contentHash);
+    if (cached?.report) {
+      const storedHashes = readStoredSectionHashes(cached);
+      return {
+        report: cached.report,
+        contentHash,
+        sectionHashes: Object.keys(storedHashes).length ? storedHashes : sectionHashes,
+        cached: true,
+        creditBalanceUsd: null,
+      };
+    }
+  }
+
+  // Load the prior report so unchanged sections can carry their score forward.
+  const latest = await readLatestQualityReport(client, userId);
+  const priorReport = latest?.report
+    ? validateQualityReport(latest.report, sections, latest.content_hash || contentHash)
+    : null;
+  const priorSectionHashes = readStoredSectionHashes(latest);
+  const priorById = new Map(priorReport?.sections.map((section) => [section.sectionId, section]) ?? []);
+
+  // When the rubric version changes, the carried-forward scores were produced by
+  // a different scoring method, so regrade the whole file once to bring it onto
+  // the new rubric instead of mixing old and new numbers.
+  const storedRubricVersion = (latest?.report as { rubricVersion?: string } | null | undefined)?.rubricVersion;
+  const rubricStale = Boolean(priorReport) && storedRubricVersion !== CREED_QUALITY_RUBRIC_VERSION;
+
+  // Decide which sections to (re)grade. With no prior report (or a stale rubric)
+  // we grade them all; otherwise the caller's explicit targets, falling back to
+  // whatever drifted.
+  const sectionIds = sections.map((section) => section.id);
+  const requested = targetSectionIds?.filter((id) => sectionIds.includes(id));
+  const targets = !priorReport || rubricStale
+    ? sectionIds
+    : requested && requested.length
+      ? requested
+      : sections
+          .filter((section) => priorSectionHashes[section.id] !== sectionHashes[section.id] || !priorById.has(section.id))
+          .map((section) => section.id);
+
+  // Nothing drifted: recompute the deterministic overall over the carried
+  // forward sections and return without a model call or a charge.
+  if (targets.length === 0 && priorReport) {
+    const report = assembleReport({
+      sections,
+      gradedById: new Map(),
+      priorById,
+      overall: overallQualitativeFromReport(priorReport),
       contentHash,
-      sectionHashes: readStoredSectionHashes(cached) ?? cached.report.sectionHashes ?? sectionHashes,
-      cached: true,
-      creditBalanceUsd: null,
-    };
+    });
+    const reportWithHashes = { ...report, sectionHashes, rubricVersion: CREED_QUALITY_RUBRIC_VERSION };
+    if (latest?.content_hash !== contentHash) {
+      await persistQualityReport({
+        client,
+        userId,
+        reportWithHashes,
+        contentHash,
+        sectionHashes,
+        modelId: latest?.model_id ?? "carry-forward",
+      });
+    }
+    return { report: reportWithHashes, contentHash, sectionHashes, cached: false, creditBalanceUsd: null };
   }
 
   const credential = await resolveAiCredential(client, userId);
   const result = await callOpenRouter({
     apiKey: credential.apiKey,
     modelId: credential.modelId,
-    // Headroom for a full multi-section report. Too low and the JSON gets cut
-    // off mid-string, which then fails to parse.
-    maxTokens: 12000,
-    temperature: 0.15,
+    // The schema-valid reply is compact (scores + short notes for the targeted
+    // sections), so this ceiling is generous headroom, not a target.
+    maxTokens: 8000,
+    // Zero temperature so the same content earns the same score run to run.
+    temperature: 0,
     // GPT-class reasoning over a full Creed can take 60-150s; the default 90s
     // abort surfaces mid-stream as "empty response". The route allows 300s.
     timeoutMs: 240000,
+    responseFormat: buildQualityResponseFormat(),
     messages: [
       {
         role: "system",
-        content:
-        `Score how well this Creed (a personal context profile every AI reads before talking to its owner) lets a fresh AI know the user. Use rubric ${CREED_QUALITY_RUBRIC_VERSION}. Be strict, specific, concise. Judge how complete, accurate, current, and concrete the profile is - not how it would help engineering. Return valid JSON only.`,
+        content: `Score how well this Creed (a personal context profile every AI reads before talking to its owner) lets a fresh AI know the user. Use rubric ${CREED_QUALITY_RUBRIC_VERSION}. Be strict, specific, and consistent. Judge how complete, accurate, current, and concrete the profile is - not how it would help engineering. Return valid JSON only.`,
       },
       {
         role: "user",
-        content: buildQualityPrompt(sections),
+        content: buildQualityPrompt(sections, targets),
       },
     ],
   });
@@ -416,11 +681,32 @@ export async function analyzeCreedQuality({
   } catch {
     throw new Error("Analysis failed. Try again.");
   }
-  const report = validateQualityReport(parsed, sections, contentHash);
-  const reportWithHashes = {
-    ...report,
-    sectionHashes,
-  };
+
+  const root = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+  const rawSections = Array.isArray(root.sections) ? root.sections : [];
+  const targetSet = new Set(targets);
+  // Only adopt fresh scores for the sections we asked for; anything the model
+  // skipped is left out of `gradedById` so `assembleReport` carries the prior
+  // score forward instead of emitting a phantom zero.
+  const gradedById = new Map<string, SectionReport>();
+  for (const section of sections) {
+    if (!targetSet.has(section.id)) {
+      continue;
+    }
+    const raw = findRawSection(rawSections, section.id);
+    if (raw) {
+      gradedById.set(section.id, normalizeSectionReport(raw, section));
+    }
+  }
+
+  const report = assembleReport({
+    sections,
+    gradedById,
+    priorById,
+    overall: parseOverallQualitative(root.overall),
+    contentHash,
+  });
+  const reportWithHashes = { ...report, sectionHashes, rubricVersion: CREED_QUALITY_RUBRIC_VERSION };
 
   // Now that we have a valid report, bill prepaid credits - before the report /
   // usage writes so a later DB hiccup can't skip the charge. No-op for BYOK.
@@ -433,32 +719,15 @@ export async function analyzeCreedQuality({
       modelId: credential.modelId,
     });
   }
-  if (persist) {
-    // Caching the report is best-effort: the client still gets it in the
-    // response, so a write hiccup must never fail (or raw-toast) the analysis.
-    try {
-      const now = new Date().toISOString();
-      const db = client as SupabaseLikeClient;
-      const { error } = await db.from("creed_quality_reports").upsert(
-        {
-          user_id: userId,
-          content_hash: contentHash,
-          section_hashes: sectionHashes,
-          model_id: credential.modelId,
-          report: reportWithHashes,
-          created_at: now,
-          updated_at: now,
-        },
-        { onConflict: "user_id" }
-      );
-      assertNoError(error, "Could not save quality report.");
-    } catch (cause) {
-      log.warn("quality_report_persist_failed", {
-        userId,
-        message: cause instanceof Error ? cause.message : String(cause),
-      });
-    }
-  }
+
+  await persistQualityReport({
+    client,
+    userId,
+    reportWithHashes,
+    contentHash,
+    sectionHashes,
+    modelId: credential.modelId,
+  });
 
   // Record usage only when the charge actually landed: BYOK never charges, and
   // in credits mode a non-null balance means the debit succeeded. This keeps the
@@ -483,75 +752,4 @@ export async function analyzeCreedQuality({
   }
 
   return { report: reportWithHashes, contentHash, sectionHashes, cached: false, creditBalanceUsd };
-}
-
-export async function updateSectionQualityBaseline({
-  client,
-  userId,
-  section,
-  sectionReport,
-}: {
-  client: unknown;
-  userId: string;
-  section: CreedSection;
-  sectionReport: CreedQualityReport["sections"][number];
-}) {
-  const latest = await readLatestQualityReport(client, userId);
-  if (!latest?.report) {
-    throw new Error("Run a full analysis before refreshing a single section.");
-  }
-
-  const now = new Date().toISOString();
-  const sectionHash = hashCreedSection(section);
-  const storedHashes = readStoredSectionHashes(latest);
-  const storedReport =
-    latest?.report && typeof latest.report === "object"
-      ? latest.report as CreedQualityReport
-      : null;
-  const existingSections = Array.isArray(storedReport?.sections) ? storedReport.sections : [];
-  const nextSections = new Map(existingSections.map((item) => [item.sectionId, item]));
-  nextSections.set(section.id, sectionReport);
-  const nextSectionHashes = {
-    ...storedHashes,
-    [section.id]: sectionHash,
-  };
-  const nextReport: CreedQualityReport = {
-    contentHash: latest.content_hash ?? "",
-    overall: storedReport?.overall ?? {
-      score: sectionReport.score,
-      summary: "",
-      tags: [],
-      strength: null,
-      gap: null,
-      strengths: [],
-      gaps: [],
-      focus: [],
-    },
-    sections: Array.from(nextSections.values()),
-    generatedAt: now,
-  };
-
-  const db = client as SupabaseLikeClient;
-  const { error } = await db.from("creed_quality_reports").upsert(
-    {
-      user_id: userId,
-      content_hash: latest.content_hash ?? "",
-      section_hashes: nextSectionHashes,
-      model_id: latest.model_id ?? "section-refresh",
-      report: {
-        ...nextReport,
-        sectionHashes: nextSectionHashes,
-      },
-      created_at: latest?.updated_at ?? now,
-      updated_at: now,
-    },
-    { onConflict: "user_id" }
-  );
-
-  assertNoError(error, "Could not save section quality baseline.");
-  return {
-    report: nextReport,
-    sectionHash,
-    sectionHashes: nextSectionHashes,
-  };
 }

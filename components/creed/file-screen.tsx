@@ -1015,31 +1015,10 @@ export function FileScreen() {
     );
 
     try {
-      // Refresh any sections whose body has drifted since their last
-      // analysis - the runner dedups, so concurrent re-mounts share work.
-      const staleSections = state.sections.filter((section) => {
-        const analyzedFingerprint = analyzedSectionFingerprints[section.id];
-        return Boolean(analyzedFingerprint) && analyzedFingerprint !== sectionFingerprints[section.id];
-      });
-      const refreshedSectionResults = await Promise.all(
-        staleSections.map(async (section) => {
-          try {
-            const result = await runSectionQuality({
-              section,
-              fingerprint: sectionFingerprints[section.id]!,
-            });
-            return result ? ([section.id, result] as const) : null;
-          } catch {
-            return null;
-          }
-        })
-      );
-      const refreshedById = new Map(
-        refreshedSectionResults.filter(
-          (entry): entry is readonly [string, CreedQualityReport["sections"][number]] => Boolean(entry)
-        )
-      );
-
+      // One whole-file pass. The server re-scores only the sections that
+      // drifted since the last analysis, carries the rest forward, and
+      // recomputes the overall - so a single call does what the old
+      // stale-section fan-out did, without the redundant per-section requests.
       const fingerprint = currentFullFingerprintRef.current ?? currentFullFingerprint;
       const payload = await runFullQuality({
         sections: state.sections,
@@ -1048,16 +1027,6 @@ export function FileScreen() {
       });
 
       if (payload.report) {
-        // Overlay sharper per-section results onto the fresh full report so
-        // forced single-section refreshes win over the bulk pass.
-        if (refreshedById.size > 0) {
-          setBaselineReport({
-            ...payload.report,
-            sections: payload.report.sections.map(
-              (sectionReport) => refreshedById.get(sectionReport.sectionId) ?? sectionReport
-            ),
-          });
-        }
         setAnalyzedFullFingerprint(fingerprint);
         setAnalyzedSectionFingerprints(
           Object.fromEntries(
@@ -1084,15 +1053,21 @@ export function FileScreen() {
     try {
       const sectionFingerprint =
         sectionFingerprintByIdRef.current.get(section.id) ?? qualityFingerprint(section);
-      const nextSectionReport = await runSectionQuality({ section, fingerprint: sectionFingerprint });
+      const nextSectionReport = await runSectionQuality({
+        sections: state.sections,
+        section,
+        fingerprint: sectionFingerprint,
+      });
       if (nextSectionReport) {
         setAnalyzedSectionFingerprints((current) => ({
           ...current,
           [section.id]: sectionFingerprint,
         }));
       }
-    } catch (error) {
-      setQualityNotice(error instanceof Error ? error.message : "Could not analyze this section.");
+    } catch {
+      // The failure surfaces as a toast via the shell QualityToasts subscriber
+      // (the runner records the outcome); just clear any stale inline notice.
+      setQualityNotice(null);
     }
   }
 
@@ -1914,7 +1889,7 @@ export function FileScreen() {
                         <DropdownMenuSeparator />
                         <AnimatedMenuIconItem
                           icon={DeleteIcon}
-                          className="bg-[#DC2626] text-[13px] text-white hover:bg-[#B91C1C] hover:text-white focus:bg-[#B91C1C] focus:text-white data-[highlighted]:bg-[#B91C1C] data-[highlighted]:text-white"
+                          className="bg-[#DC2626] text-[13px] text-white hover:bg-[#B91C1C] hover:text-white focus:bg-[#B91C1C] focus:text-white data-[highlighted]:bg-[#B91C1C] data-[highlighted]:text-white not-data-[variant=destructive]:focus:**:text-white"
                           onSelect={() => {
                             // Let the menu close first, then open the dialog on
                             // the next tick so its enter animation plays (two
@@ -2604,7 +2579,7 @@ function SectionCard({
               {/* Solid red, matching the file menu's Delete. */}
               <AnimatedMenuIconItem
                 icon={DeleteIcon}
-                className="bg-[#DC2626] text-[13px] text-white hover:bg-[#B91C1C] hover:text-white focus:bg-[#B91C1C] focus:text-white data-[highlighted]:bg-[#B91C1C] data-[highlighted]:text-white"
+                className="bg-[#DC2626] text-[13px] text-white hover:bg-[#B91C1C] hover:text-white focus:bg-[#B91C1C] focus:text-white data-[highlighted]:bg-[#B91C1C] data-[highlighted]:text-white not-data-[variant=destructive]:focus:**:text-white"
                 onSelect={onDelete}
               >
                 Delete

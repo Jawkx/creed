@@ -51,6 +51,7 @@ export async function callOpenRouter({
   maxTokens,
   temperature = 0.2,
   timeoutMs = 90000,
+  responseFormat,
 }: {
   apiKey: string;
   modelId: string;
@@ -58,6 +59,9 @@ export async function callOpenRouter({
   maxTokens: number;
   temperature?: number;
   timeoutMs?: number;
+  // Optional OpenRouter response_format (e.g. a json_schema) to force a
+  // well-formed, schema-valid reply. Omitted for free-form calls.
+  responseFormat?: Record<string, unknown>;
 }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -80,6 +84,7 @@ export async function callOpenRouter({
         temperature,
         max_tokens: maxTokens,
         messages,
+        ...(responseFormat ? { response_format: responseFormat } : {}),
       }),
       signal: controller.signal,
       cache: "no-store",

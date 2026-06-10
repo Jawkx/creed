@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { analyzeCreedQuality, readQualityBaseline, updateSectionQualityBaseline } from "@/lib/ai/quality";
+import { analyzeCreedQuality, readQualityBaseline } from "@/lib/ai/quality";
 import type { CreedSection } from "@/lib/creed-data";
 import { requireApiAuth } from "@/lib/api-auth";
 
@@ -17,7 +17,7 @@ export async function POST(request: Request) {
       sections?: CreedSection[];
       force?: boolean;
       readOnly?: boolean;
-      scope?: "full" | "section";
+      targetSectionIds?: string[];
     };
 
     if (!Array.isArray(body.sections) || body.sections.length > 200) {
@@ -39,22 +39,10 @@ export async function POST(request: Request) {
       userId: auth.user.id,
       sections: body.sections,
       force: body.force,
-      persist: body.scope !== "section",
+      targetSectionIds: Array.isArray(body.targetSectionIds)
+        ? body.targetSectionIds.filter((id): id is string => typeof id === "string")
+        : undefined,
     });
-
-    if (body.scope === "section" && body.sections.length === 1 && result.report?.sections[0]) {
-      const baseline = await updateSectionQualityBaseline({
-        client: auth.supabase,
-        userId: auth.user.id,
-        section: body.sections[0],
-        sectionReport: result.report.sections[0],
-      });
-
-      return NextResponse.json({
-        ...result,
-        sectionHashes: baseline.sectionHashes,
-      });
-    }
 
     return NextResponse.json(result);
   } catch (error) {

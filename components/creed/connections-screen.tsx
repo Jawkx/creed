@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { CopyIcon } from "@/components/ui/copy";
 import { AgentIconStack } from "@/components/creed/agent-icon-stack";
 import { AnimatedIconButton } from "@/components/creed/animated-icon-action";
-import { IntegrationGlyph } from "@/components/creed/brand";
 import { ConnectionCard, resolveConnectionStatus } from "@/components/creed/connection-card";
 import { McpHealthDashboard } from "@/components/creed/mcp-health-dashboard";
 import { useCreed } from "@/components/creed/creed-provider";
@@ -58,7 +57,23 @@ export function ConnectionsScreen() {
         <div className="mt-5 flex h-auto flex-col self-start rounded-[16px] border border-[var(--creed-border)] bg-[var(--creed-surface)] p-4 md:p-5">
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-center gap-3">
-              <IntegrationGlyph kind="mcp" framed={false} className="h-9 w-9 shrink-0" />
+              {/* All-agents glyph recoloured by the cycling palette: the asset
+                  is a monochrome svg, so we mask the cycling background to its
+                  shape rather than tinting an <img>. */}
+              <span
+                aria-hidden
+                className="creed-copy-cycle inline-block h-9 w-9 shrink-0"
+                style={{
+                  WebkitMaskImage: "url(/assets/agents/allagents.svg)",
+                  maskImage: "url(/assets/agents/allagents.svg)",
+                  WebkitMaskRepeat: "no-repeat",
+                  maskRepeat: "no-repeat",
+                  WebkitMaskPosition: "center",
+                  maskPosition: "center",
+                  WebkitMaskSize: "contain",
+                  maskSize: "contain",
+                }}
+              />
               <div>
                 <div className="text-[15px] font-medium text-[var(--creed-text-primary)]">
                   All Agents
@@ -99,7 +114,7 @@ export function ConnectionsScreen() {
             <AnimatedIconButton
               icon={CopyIcon}
               showIcon={copied !== "mcp-url"}
-              className="min-w-[116px] justify-center rounded-md bg-[var(--creed-text-primary)] px-4 text-[var(--creed-button-primary-fg)] hover:bg-[var(--creed-button-primary-hover)]"
+              className="creed-copy-cycle min-w-[116px] justify-center rounded-md px-4 text-white"
               onClick={() => copyValue("mcp-url", state.mcpUrl)}
             >
               {copied === "mcp-url" ? (
