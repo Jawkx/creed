@@ -10,6 +10,10 @@ const eslintConfig = defineConfig([
     // Default ignores of eslint-config-next:
     ".next/**",
     ".next-runtime/**",
+    // Isolated dist dir for the `creed-preview` launch config (gitignored as
+    // `.next-preview*`); ignore it here too so linting after a preview run
+    // doesn't drown in generated-file errors.
+    ".next-preview/**",
     "out/**",
     "build/**",
     "next-env.d.ts",

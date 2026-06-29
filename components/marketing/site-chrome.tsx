@@ -37,6 +37,7 @@ const navGroups: { label: string; items: NavItem[] }[] = [
     items: [
       { label: "Pricing", href: "/pricing" },
       { label: "Examples", href: "/examples" },
+      { label: "Roadmap", href: "/roadmap" },
     ],
   },
   {
@@ -769,7 +770,7 @@ export function MarketingFooter() {
         </div>
 
         <div className="grid gap-8 sm:grid-cols-3">
-          <FooterColumn title="Product" links={["Pricing", "Examples"]} />
+          <FooterColumn title="Product" links={["Pricing", "Examples", "Roadmap"]} />
           <FooterColumn title="Legal" links={["Privacy", "Terms", "Stack"]} />
           <FooterColumn
             title="Resources"
@@ -882,6 +883,8 @@ function FooterColumn({ title, links }: { title: string; links: string[] }) {
                 ? "/pricing"
                 : link === "Examples"
                   ? "/examples"
+                  : link === "Roadmap"
+                  ? "/roadmap"
                   : link === "Privacy"
                   ? "/privacy"
                   : link === "Terms"

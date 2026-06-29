@@ -25,6 +25,9 @@ import { usePaidStatus } from "@/components/marketing/use-paid-status";
 import { useOnboardingResume } from "@/components/marketing/use-onboarding-resume";
 import { useAnimatedIconControls } from "@/components/creed/animated-icon-controls";
 import { ArrowRightIcon } from "@/components/ui/arrow-right";
+import { useRoadmap } from "@/components/marketing/use-roadmap";
+import { ROADMAP_STATUS_STYLE } from "@/components/marketing/roadmap-status";
+import type { RoadmapColumn, RoadmapTask } from "@/lib/marketing/roadmap";
 import { homeFaqItems as faqItems } from "@/lib/marketing/faq";
 import { cn } from "@/lib/utils";
 
@@ -143,6 +146,7 @@ export function BelowHeroSections({ configured }: { configured: boolean }) {
       <GovernedCollaborationSection />
       <HowItWorksSection />
       <IntegrationsSection />
+      <WhatsOnTheWaySection />
       <FaqSection />
       <ClosingCtaSection configured={configured} />
       <MarketingFooter />
@@ -440,6 +444,74 @@ function IntegrationsSection() {
         ))}
       </div>
     </section>
+  );
+}
+
+// A teaser of the live roadmap: the top item in each status (Next, In Progress,
+// Shipped), pulled from the same median board as the /roadmap page. Renders
+// nothing until data arrives, and hides itself if the board is empty or
+// unavailable, so it never shows an empty shell on the landing page.
+function WhatsOnTheWaySection() {
+  const columns = useRoadmap();
+
+  const cards = (columns ?? [])
+    .map((column) => ({ column, task: column.tasks[0] }))
+    .filter((entry): entry is { column: RoadmapColumn; task: RoadmapTask } =>
+      Boolean(entry.task),
+    );
+
+  if (cards.length === 0) return null;
+
+  return (
+    <section className="px-6 py-24 md:px-10 md:py-30 lg:px-12">
+      <SectionHeading
+        headline="What's on the way"
+        subline="The top of each stage, pulled live from our task board."
+        className="max-w-[56rem]"
+      />
+
+      <div className="mx-auto mt-14 flex max-w-6xl flex-wrap justify-center gap-5">
+        {cards.map(({ column, task }) => (
+          <RoadmapTeaserCard key={column.id} column={column} task={task} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// One teaser card: a colour-coded status header bar built into the card (the
+// look from the reference roadmap), then the feature title and a short summary.
+function RoadmapTeaserCard({
+  column,
+  task,
+}: {
+  column: RoadmapColumn;
+  task: RoadmapTask;
+}) {
+  const style = ROADMAP_STATUS_STYLE[column.id];
+  return (
+    <article className="flex w-full flex-col overflow-hidden rounded-2xl bg-[var(--creed-surface)] sm:w-[340px]">
+      <div className={cn("px-5 py-2.5", style.fill)}>
+        <span className={cn("text-[12px] font-medium", style.text)}>
+          {column.label}
+        </span>
+      </div>
+      <div className="flex flex-1 flex-col p-5">
+        {task.code ? (
+          <div className="font-mono text-[11px] tracking-tight text-[var(--creed-text-tertiary)]">
+            {task.code}
+          </div>
+        ) : null}
+        <h3 className="mt-1.5 text-[16px] font-medium leading-snug tracking-[-0.01em] text-[var(--creed-text-primary)]">
+          {task.title}
+        </h3>
+        {task.description ? (
+          <p className="t-body mt-2 line-clamp-2 text-[var(--creed-text-secondary)]">
+            {task.description}
+          </p>
+        ) : null}
+      </div>
+    </article>
   );
 }
 
