@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { StackPageView } from "@/components/marketing/stack-page-view";
+import { redirect } from "next/navigation";
+import { isSelfHostedMode } from "@/lib/deployment-mode";
 
 export const metadata: Metadata = {
   title: "Stack",
@@ -7,6 +8,11 @@ export const metadata: Metadata = {
   alternates: { canonical: "/stack" },
 };
 
-export default function StackPage() {
+export default async function StackPage() {
+  if (isSelfHostedMode()) {
+    redirect("/");
+  }
+
+  const { StackPageView } = await import("@/components/marketing/stack-page-view");
   return <StackPageView />;
 }

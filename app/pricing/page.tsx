@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { PricingPageView } from "@/components/marketing/pricing-page-view";
+import { redirect } from "next/navigation";
+import { isSelfHostedMode } from "@/lib/deployment-mode";
 
 export const metadata: Metadata = {
   title: "Pricing",
@@ -7,6 +8,11 @@ export const metadata: Metadata = {
   alternates: { canonical: "/pricing" },
 };
 
-export default function PricingPage() {
+export default async function PricingPage() {
+  if (isSelfHostedMode()) {
+    redirect("/");
+  }
+
+  const { PricingPageView } = await import("@/components/marketing/pricing-page-view");
   return <PricingPageView />;
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
+import { isSelfHostedMode } from "@/lib/deployment-mode";
 import { getEntitlement, getStripeClient } from "@/lib/stripe";
 import { getSiteUrl } from "@/lib/supabase/env";
 import { log } from "@/lib/observability";
@@ -13,6 +14,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST() {
+  if (isSelfHostedMode()) {
+    return NextResponse.json(
+      { error: "Billing is disabled on self-hosted deployments." },
+      { status: 404 }
+    );
+  }
+
   const auth = await requireApiAuth();
   if (auth instanceof NextResponse) return auth;
 

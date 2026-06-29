@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { isSelfHostedMode } from "@/lib/deployment-mode";
 import { getSiteUrl } from "@/lib/supabase/env";
 
 // Indexable surface = marketing pages only. Everything behind auth or
@@ -7,6 +8,18 @@ import { getSiteUrl } from "@/lib/supabase/env";
 // success URL.
 export default function robots(): MetadataRoute.Robots {
   const base = getSiteUrl().replace(/\/$/, "");
+
+  if (isSelfHostedMode()) {
+    return {
+      rules: [
+        {
+          userAgent: "*",
+          disallow: "/",
+        },
+      ],
+      host: base,
+    };
+  }
 
   return {
     rules: [

@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { encryptSecret } from "@/lib/secret-crypto";
 import type { AiModelQuality } from "@/lib/ai/model-catalog";
 import { normalizeFeature } from "@/lib/ai/features";
+import { isSelfHostedMode } from "@/lib/deployment-mode";
 
 import type { SupabaseLikeClient } from "@/lib/supabase/types";
 
@@ -30,6 +31,7 @@ export type PublicAiSettings = {
   provider: "openrouter";
   keyStatus: "missing" | "valid" | "invalid";
   aiMode: AiMode;
+  selfHosted: boolean;
   keyLastFour?: string;
   lastValidatedAt?: string;
 };
@@ -65,10 +67,12 @@ function assertNoError(error: { message: string } | null, fallback: string) {
 }
 
 export function buildPublicAiSettings(row?: AiSettingsRow | null): PublicAiSettings {
+  const selfHosted = isSelfHostedMode();
   return {
     provider: "openrouter",
     keyStatus: row?.key_status ?? "missing",
-    aiMode: row?.ai_mode ?? "credits",
+    aiMode: selfHosted ? "byok" : (row?.ai_mode ?? "credits"),
+    selfHosted,
     keyLastFour: row?.api_key_last_four ?? undefined,
     lastValidatedAt: row?.last_validated_at ?? undefined,
   };
@@ -107,7 +111,9 @@ export async function upsertAiSettings({
   const existing = await readAiSettings(db, userId);
   const now = new Date().toISOString();
   const trimmedKey = apiKey?.trim();
-  const nextMode: AiMode = aiMode ?? existing?.ai_mode ?? "credits";
+  const nextMode: AiMode = isSelfHostedMode()
+    ? "byok"
+    : (aiMode ?? existing?.ai_mode ?? "credits");
 
   // No key-required guard here. This endpoint also handles the credits/byok
   // toggle, which involves no key. The "you need a key" check happens at

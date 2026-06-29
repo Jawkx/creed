@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { DocsPageView } from "@/components/marketing/docs-page-view";
+import { redirect } from "next/navigation";
+import { isSelfHostedMode } from "@/lib/deployment-mode";
 
 export const metadata: Metadata = {
   title: "Docs",
@@ -7,6 +8,11 @@ export const metadata: Metadata = {
   alternates: { canonical: "/docs" },
 };
 
-export default function DocsPage() {
+export default async function DocsPage() {
+  if (isSelfHostedMode()) {
+    redirect("/");
+  }
+
+  const { DocsPageView } = await import("@/components/marketing/docs-page-view");
   return <DocsPageView />;
 }

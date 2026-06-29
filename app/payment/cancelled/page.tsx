@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { isSelfHostedMode } from "@/lib/deployment-mode";
 
 export const metadata: Metadata = {
   title: "Checkout cancelled · Creed",
@@ -7,6 +9,10 @@ export const metadata: Metadata = {
 };
 
 export default function PaymentCancelledPage() {
+  if (isSelfHostedMode()) {
+    redirect("/");
+  }
+
   return (
     <div className="min-h-screen bg-[var(--creed-background)] text-[var(--creed-text-primary)]">
       <div className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center px-6 py-16 text-center">

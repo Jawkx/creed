@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { MAX_TOPUP_USD, MIN_TOPUP_USD } from "@/lib/ai/credit-config";
+import { isSelfHostedMode } from "@/lib/deployment-mode";
 import { getStripeClient, getStripePublishableKey } from "@/lib/stripe";
 import { requireApiAuth } from "@/lib/api-auth";
 
@@ -10,6 +11,13 @@ import { requireApiAuth } from "@/lib/api-auth";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  if (isSelfHostedMode()) {
+    return NextResponse.json(
+      { error: "Credits are disabled on self-hosted deployments. Use BYOK instead." },
+      { status: 404 }
+    );
+  }
+
   const auth = await requireApiAuth();
   if (auth instanceof NextResponse) return auth;
 

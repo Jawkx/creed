@@ -1,9 +1,15 @@
 import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
+import { SelfHostAccessScreen } from "@/components/auth/self-host-access-screen";
 import { AppShellLayout } from "@/components/creed/app-shell-layout";
 import { AuthedProviders } from "@/components/creed/authed-providers";
 import { hasPersistedCreed } from "@/lib/creed-backend";
 import { isSupabaseTableMissingError } from "@/lib/creed-backend-errors";
+import {
+  getSelfHostedOwnerEmail,
+  isSelfHostedMode,
+  isSelfHostedOwner,
+} from "@/lib/deployment-mode";
 import { hasActiveEntitlement } from "@/lib/stripe";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
@@ -37,7 +43,7 @@ export default async function CreedAppLayout({ children }: { children: ReactNode
     // the app can render. Production deployments always have Supabase.
     return (
       <AuthedProviders>
-        <AppShellLayout>{children}</AppShellLayout>
+        <AppShellLayout selfHosted={isSelfHostedMode()}>{children}</AppShellLayout>
       </AuthedProviders>
     );
   }
@@ -48,7 +54,16 @@ export default async function CreedAppLayout({ children }: { children: ReactNode
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect("/pricing");
+    redirect(isSelfHostedMode() ? "/login" : "/pricing");
+  }
+
+  if (!isSelfHostedOwner(user)) {
+    return (
+      <SelfHostAccessScreen
+        email={user.email}
+        ownerEmail={getSelfHostedOwnerEmail()}
+      />
+    );
   }
 
   const paid = await hasActiveEntitlement(supabase, user.id);
@@ -73,7 +88,7 @@ export default async function CreedAppLayout({ children }: { children: ReactNode
 
   return (
     <AuthedProviders>
-      <AppShellLayout>{children}</AppShellLayout>
+      <AppShellLayout selfHosted={isSelfHostedMode()}>{children}</AppShellLayout>
     </AuthedProviders>
   );
 }

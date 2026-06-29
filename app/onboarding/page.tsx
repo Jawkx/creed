@@ -1,7 +1,13 @@
 import { redirect } from "next/navigation";
+import { SelfHostAccessScreen } from "@/components/auth/self-host-access-screen";
 import { OnboardingScreen } from "@/components/creed/onboarding-screen";
 import { loadCreedState } from "@/lib/creed-backend";
 import { isSupabaseTableMissingError } from "@/lib/creed-backend-errors";
+import {
+  getSelfHostedOwnerEmail,
+  isSelfHostedMode,
+  isSelfHostedOwner,
+} from "@/lib/deployment-mode";
 import { hasActiveEntitlement } from "@/lib/stripe";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
@@ -29,7 +35,16 @@ export default async function OnboardingPage() {
     } = await supabase.auth.getUser();
 
     if (!user) {
-      redirect("/home");
+      redirect(isSelfHostedMode() ? "/login" : "/home");
+    }
+
+    if (!isSelfHostedOwner(user)) {
+      return (
+        <SelfHostAccessScreen
+          email={user.email}
+          ownerEmail={getSelfHostedOwnerEmail()}
+        />
+      );
     }
 
     paid = await hasActiveEntitlement(supabase, user.id);

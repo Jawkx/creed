@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { isSelfHostedMode } from "@/lib/deployment-mode";
 import { getSiteUrl } from "@/lib/supabase/env";
 
 // Only marketing routes go in the sitemap - anything behind the
@@ -22,6 +23,10 @@ const PUBLIC_PATHS = [
 ];
 
 export default function sitemap(): MetadataRoute.Sitemap {
+  if (isSelfHostedMode()) {
+    return [];
+  }
+
   const base = getSiteUrl().replace(/\/$/, "");
   const lastModified = new Date();
 

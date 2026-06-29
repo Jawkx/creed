@@ -5,7 +5,13 @@ import { CreedShell } from "@/components/creed/shell";
 import { QualityToasts } from "@/components/creed/quality-toasts";
 import { useCreed } from "@/components/creed/creed-provider";
 
-export function AppShellLayout({ children }: { children: ReactNode }) {
+export function AppShellLayout({
+  children,
+  selfHosted = false,
+}: {
+  children: ReactNode;
+  selfHosted?: boolean;
+}) {
   const { state } = useCreed();
 
   return (
@@ -18,6 +24,7 @@ export function AppShellLayout({ children }: { children: ReactNode }) {
         avatarInitials={state.user.avatarInitials}
         avatarUrl={state.user.avatarUrl}
         sections={state.sections}
+        selfHosted={selfHosted}
       >
         {children}
       </CreedShell>

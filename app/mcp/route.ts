@@ -10,6 +10,7 @@ import {
   recordMcpClientUsage,
 } from "@/lib/creed-backend";
 import { CREED_PROMPTS } from "@/lib/creed-prompts";
+import { isSelfHostedOwner } from "@/lib/deployment-mode";
 import { findOAuthAccessToken } from "@/lib/oauth";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -1561,6 +1562,12 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { error: userError?.message ?? "Could not load Creed account." },
       { status: 500, headers: MCP_CORS_HEADERS }
+    );
+  }
+  if (!isSelfHostedOwner(userData.user)) {
+    return NextResponse.json(
+      { error: "This self-hosted instance is limited to the owner account." },
+      { status: 403, headers: MCP_CORS_HEADERS }
     );
   }
 

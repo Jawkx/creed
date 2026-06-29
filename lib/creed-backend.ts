@@ -31,6 +31,7 @@ import { getSiteUrl } from "@/lib/supabase/env";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { decryptSecret, encryptSecret, hashSecret } from "@/lib/secret-crypto";
 import { log } from "@/lib/observability";
+import { isSelfHostedOwner } from "@/lib/deployment-mode";
 import type { SupabaseLikeClient } from "@/lib/supabase/types";
 
 type SectionRow = {
@@ -1600,6 +1601,10 @@ export async function buildAgentPayloadForToken(
 
   if (userError || !userData?.user) {
     throw new Error(userError?.message || "Could not load token owner.");
+  }
+
+  if (!isSelfHostedOwner(userData.user)) {
+    return null;
   }
 
   const { state } = await loadCreedState(db, userData.user);

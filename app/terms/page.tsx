@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { TermsPageView } from "@/components/marketing/terms-page-view";
+import { redirect } from "next/navigation";
+import { isSelfHostedMode } from "@/lib/deployment-mode";
 
 export const metadata: Metadata = {
   title: "Terms and Conditions",
@@ -7,6 +8,11 @@ export const metadata: Metadata = {
   alternates: { canonical: "/terms" },
 };
 
-export default function TermsPage() {
+export default async function TermsPage() {
+  if (isSelfHostedMode()) {
+    redirect("/");
+  }
+
+  const { TermsPageView } = await import("@/components/marketing/terms-page-view");
   return <TermsPageView />;
 }

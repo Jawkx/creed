@@ -1,15 +1,7 @@
 import type { Metadata } from "next";
-import { LandingHeroEntry } from "@/components/auth/landing-hero-entry";
-import { JsonLd } from "@/components/marketing/json-ld";
+import { redirect } from "next/navigation";
+import { isSelfHostedMode } from "@/lib/deployment-mode";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
-import { homeFaqItems } from "@/lib/marketing/faq";
-import {
-  faqPageSchema,
-  graph,
-  organizationSchema,
-  softwareApplicationSchema,
-  websiteSchema,
-} from "@/lib/seo/structured-data";
 
 // /home is the canonical public landing (the root `/` redirects here for
 // signed-out visitors). It inherits the brand title.default and the full
@@ -21,7 +13,22 @@ export const metadata: Metadata = {
   alternates: { canonical: "/home" },
 };
 
-export default function HomeLandingPage() {
+export default async function HomeLandingPage() {
+  if (isSelfHostedMode()) {
+    redirect("/");
+  }
+
+  const { LandingHeroEntry } = await import("@/components/auth/landing-hero-entry");
+  const { JsonLd } = await import("@/components/marketing/json-ld");
+  const { homeFaqItems } = await import("@/lib/marketing/faq");
+  const {
+    faqPageSchema,
+    graph,
+    organizationSchema,
+    softwareApplicationSchema,
+    websiteSchema,
+  } = await import("@/lib/seo/structured-data");
+
   return (
     <>
       <JsonLd

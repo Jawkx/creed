@@ -9,6 +9,7 @@ import {
   isPlanPurchasable,
   resolvePriceId,
 } from "@/lib/stripe";
+import { isSelfHostedMode } from "@/lib/deployment-mode";
 import { getSiteUrl } from "@/lib/supabase/env";
 import { log } from "@/lib/observability";
 
@@ -38,6 +39,13 @@ function parseCadence(value: unknown): PurchaseCadence {
 }
 
 export async function POST(request: Request) {
+  if (isSelfHostedMode()) {
+    return NextResponse.json(
+      { error: "Checkout is disabled on self-hosted deployments." },
+      { status: 404 }
+    );
+  }
+
   const auth = await requireApiAuth();
   if (auth instanceof NextResponse) return auth;
 

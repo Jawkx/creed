@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { ContinueButton } from "@/app/payment/success/continue-button";
 import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
+import { isSelfHostedMode } from "@/lib/deployment-mode";
 import {
   getStripeClient,
   upsertEntitlementFromSession,
@@ -111,6 +113,10 @@ export default async function PaymentSuccessPage({
 }: {
   searchParams: Promise<{ session_id?: string }>;
 }) {
+  if (isSelfHostedMode()) {
+    redirect("/");
+  }
+
   const params = await searchParams;
   const state = await resolveState(params.session_id ?? null);
 

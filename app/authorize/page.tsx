@@ -1,7 +1,12 @@
 import Link from "next/link";
+import { SelfHostAccessScreen } from "@/components/auth/self-host-access-screen";
 import { CreedWordmark, IntegrationGlyph } from "@/components/creed/brand";
 import { Button } from "@/components/ui/button";
 import { getAgentIconKind } from "@/lib/agent-icon";
+import {
+  getSelfHostedOwnerEmail,
+  isSelfHostedOwner,
+} from "@/lib/deployment-mode";
 import { getOAuthClient, isAllowedRedirectUri } from "@/lib/oauth";
 import { hasActiveEntitlement } from "@/lib/stripe";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
@@ -131,6 +136,15 @@ export default async function AuthorizePage({
           </Link>
         </div>
       </Shell>
+    );
+  }
+
+  if (!isSelfHostedOwner(user)) {
+    return (
+      <SelfHostAccessScreen
+        email={user.email}
+        ownerEmail={getSelfHostedOwnerEmail()}
+      />
     );
   }
 

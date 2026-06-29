@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isSelfHostedOwner } from "@/lib/deployment-mode";
 import { entitlementGrantsAccess, isSelfHostedAccessEnabled } from "@/lib/stripe";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
@@ -69,7 +70,10 @@ export async function GET() {
   }
 
   if (isSelfHostedAccessEnabled()) {
-    return NextResponse.json(SELF_HOSTED_ACCESS, { headers: NO_STORE_HEADERS });
+    return NextResponse.json(
+      isSelfHostedOwner(user) ? SELF_HOSTED_ACCESS : NO_ACCESS,
+      { headers: NO_STORE_HEADERS }
+    );
   }
 
   // Ownership is decided from the always-present columns (billing_mode + status),

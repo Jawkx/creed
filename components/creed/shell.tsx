@@ -3,6 +3,8 @@
 import Image from "next/image";
 import {
   createContext,
+  lazy,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -15,12 +17,10 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { AnimatedMenuIconItem } from "@/components/creed/animated-icon-action";
-import { FeedbackMenuItem } from "@/components/creed/feedback-menu";
 import { BookTextIcon } from "@/components/ui/book-text";
 import { ConnectIcon } from "@/components/ui/connect";
 import { ContrastIcon, type ContrastIconHandle } from "@/components/ui/contrast";
 import { CreditCardIcon } from "@/components/ui/credit-card";
-import { BillingDialog } from "@/components/creed/billing-dialog";
 import { FileTextIcon } from "@/components/ui/file-text";
 import { LinkIcon } from "@/components/ui/link";
 import { LogoutIcon } from "@/components/ui/logout";
@@ -45,6 +45,18 @@ import { preloadMcpHealth } from "@/components/creed/mcp-health-preload";
 
 const FILE_NAV_INTENT_KEY = "creed:file-nav-intent";
 
+const BillingDialog = lazy(() =>
+  import("@/components/creed/billing-dialog").then((module) => ({
+    default: module.BillingDialog,
+  }))
+);
+
+const FeedbackMenuItem = lazy(() =>
+  import("@/components/creed/feedback-menu").then((module) => ({
+    default: module.FeedbackMenuItem,
+  }))
+);
+
 type ShellProps = {
   children: ReactNode;
   userName: string;
@@ -52,6 +64,7 @@ type ShellProps = {
   avatarUrl?: string;
   sections: CreedSection[];
   pendingProposalSectionIds?: string[];
+  selfHosted?: boolean;
 };
 
 type ShellFileActions = {
@@ -121,6 +134,7 @@ export function CreedShell({
   avatarUrl,
   sections,
   pendingProposalSectionIds = [],
+  selfHosted = false,
 }: ShellProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -256,7 +270,7 @@ export function CreedShell({
         <aside className="h-screen overflow-hidden border-r border-[var(--creed-border)] bg-[var(--creed-surface)] px-1.5 py-3 lg:px-5 lg:py-5">
           <div className="flex h-full flex-col">
             <Link
-              href="/home"
+              href={selfHosted ? "/file" : "/home"}
               aria-label="Creed home"
               className="mx-auto flex h-8 w-8 items-center justify-center rounded-[10px] transition-opacity duration-200 hover:opacity-60 lg:mx-0 lg:h-auto lg:w-auto lg:justify-start lg:px-2 lg:py-1.5"
             >
@@ -430,35 +444,43 @@ export function CreedShell({
                   align="start"
                   className="w-(--radix-dropdown-menu-trigger-width) border-[var(--creed-border)] bg-[var(--creed-surface)]"
                 >
-                  <AnimatedMenuIconItem
-                    icon={LinkIcon}
-                    className="text-[13px]"
-                    onSelect={() => {
-                      router.push("/home");
-                    }}
-                  >
-                    Homepage
-                  </AnimatedMenuIconItem>
-                  <AnimatedMenuIconItem
-                    icon={BookTextIcon}
-                    className="text-[13px]"
-                    onSelect={() => {
-                      router.push("/docs");
-                    }}
-                  >
-                    Docs
-                  </AnimatedMenuIconItem>
-                  <FeedbackMenuItem />
+                  {!selfHosted ? (
+                    <>
+                      <AnimatedMenuIconItem
+                        icon={LinkIcon}
+                        className="text-[13px]"
+                        onSelect={() => {
+                          router.push("/home");
+                        }}
+                      >
+                        Homepage
+                      </AnimatedMenuIconItem>
+                      <AnimatedMenuIconItem
+                        icon={BookTextIcon}
+                        className="text-[13px]"
+                        onSelect={() => {
+                          router.push("/docs");
+                        }}
+                      >
+                        Docs
+                      </AnimatedMenuIconItem>
+                      <Suspense fallback={null}>
+                        <FeedbackMenuItem />
+                      </Suspense>
+                    </>
+                  ) : null}
                   <ThemeToggleMenuItem />
-                  <AnimatedMenuIconItem
-                    icon={CreditCardIcon}
-                    className="text-[13px]"
-                    onSelect={() => {
-                      setBillingOpen(true);
-                    }}
-                  >
-                    Billing
-                  </AnimatedMenuIconItem>
+                  {!selfHosted ? (
+                    <AnimatedMenuIconItem
+                      icon={CreditCardIcon}
+                      className="text-[13px]"
+                      onSelect={() => {
+                        setBillingOpen(true);
+                      }}
+                    >
+                      Billing
+                    </AnimatedMenuIconItem>
+                  ) : null}
                   <AnimatedMenuIconItem
                     icon={LogoutIcon}
                     className="text-[13px]"
@@ -479,7 +501,11 @@ export function CreedShell({
         </main>
       </div>
 
-      <BillingDialog open={billingOpen} onOpenChange={setBillingOpen} />
+      {!selfHosted && billingOpen ? (
+        <Suspense fallback={null}>
+          <BillingDialog open={billingOpen} onOpenChange={setBillingOpen} />
+        </Suspense>
+      ) : null}
     </ShellActionsContext.Provider>
   );
 }

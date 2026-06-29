@@ -20,6 +20,7 @@ import type { AiFeature } from "@/lib/ai/features";
 import { readAiSettings, type AiMode } from "@/lib/ai/persistence";
 import { decryptSecret } from "@/lib/secret-crypto";
 import { log } from "@/lib/observability";
+import { isSelfHostedMode } from "@/lib/deployment-mode";
 
 // Floor every debit so a near-zero call still records a charge. 1000 micro = $0.001.
 const MIN_DEBIT_MICRO = 1000;
@@ -190,8 +191,10 @@ export async function resolveAiCredential(
   feature: AiFeature
 ): Promise<ResolvedAiCredential> {
   const row = await readAiSettings(client, userId);
-  const mode: AiMode = row?.ai_mode === "byok" ? "byok" : "credits";
   const modelId = getFeatureModelId(feature);
+  const mode: AiMode = isSelfHostedMode()
+    ? "byok"
+    : row?.ai_mode === "byok" ? "byok" : "credits";
 
   if (mode === "byok") {
     const encryptedKey = row?.encrypted_api_key;

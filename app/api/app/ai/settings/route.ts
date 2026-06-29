@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { readPublicAiSettings, upsertAiSettings } from "@/lib/ai/persistence";
 import { requireApiAuth } from "@/lib/api-auth";
 import { recordAuditEvent } from "@/lib/audit-log";
+import { isSelfHostedMode } from "@/lib/deployment-mode";
 
 // The model is server-selected per feature and hidden from the user, so there
 // is no model catalog in either response and no modelId in the body: this route
@@ -32,6 +33,13 @@ export async function PUT(request: Request) {
 
     if (body.aiMode !== undefined && body.aiMode !== "credits" && body.aiMode !== "byok") {
       return NextResponse.json({ error: "Invalid AI mode." }, { status: 400 });
+    }
+
+    if (isSelfHostedMode() && body.aiMode === "credits") {
+      return NextResponse.json(
+        { error: "Credits mode is disabled on self-hosted deployments." },
+        { status: 400 }
+      );
     }
 
     const settings = await upsertAiSettings({

@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
-import { ExamplesPageView } from "@/components/marketing/examples-page-view";
-import { JsonLd } from "@/components/marketing/json-ld";
-import { breadcrumbSchema, graph, webPageSchema } from "@/lib/seo/structured-data";
+import { redirect } from "next/navigation";
+import { isSelfHostedMode } from "@/lib/deployment-mode";
 
 const PATH = "/examples";
 const TITLE = "Examples";
@@ -20,7 +19,15 @@ export const metadata: Metadata = {
   },
 };
 
-export default function ExamplesPage() {
+export default async function ExamplesPage() {
+  if (isSelfHostedMode()) {
+    redirect("/");
+  }
+
+  const { ExamplesPageView } = await import("@/components/marketing/examples-page-view");
+  const { JsonLd } = await import("@/components/marketing/json-ld");
+  const { breadcrumbSchema, graph, webPageSchema } = await import("@/lib/seo/structured-data");
+
   return (
     <>
       <JsonLd

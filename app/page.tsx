@@ -1,7 +1,13 @@
 import { redirect } from "next/navigation";
 import { BackendSetupScreen } from "@/components/auth/backend-setup-screen";
+import { SelfHostAccessScreen } from "@/components/auth/self-host-access-screen";
 import { hasPersistedCreed } from "@/lib/creed-backend";
 import { isSupabaseTableMissingError } from "@/lib/creed-backend-errors";
+import {
+  getSelfHostedOwnerEmail,
+  isSelfHostedMode,
+  isSelfHostedOwner,
+} from "@/lib/deployment-mode";
 import { hasActiveEntitlement } from "@/lib/stripe";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -17,7 +23,7 @@ import { log } from "@/lib/observability";
 // (creed-app) layout will load real state on the next request.
 export default async function Home() {
   if (!isSupabaseConfigured()) {
-    redirect("/home");
+    redirect(isSelfHostedMode() ? "/login" : "/home");
   }
 
   let supabase;
@@ -38,7 +44,16 @@ export default async function Home() {
   }
 
   if (!user) {
-    redirect("/home");
+    redirect(isSelfHostedMode() ? "/login" : "/home");
+  }
+
+  if (!isSelfHostedOwner(user)) {
+    return (
+      <SelfHostAccessScreen
+        email={user.email}
+        ownerEmail={getSelfHostedOwnerEmail()}
+      />
+    );
   }
 
   // Entitlement gate: the app is the paid product, so signed-in users

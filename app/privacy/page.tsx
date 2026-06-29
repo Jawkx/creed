@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { PrivacyPageView } from "@/components/marketing/privacy-page-view";
+import { redirect } from "next/navigation";
+import { isSelfHostedMode } from "@/lib/deployment-mode";
 
 export const metadata: Metadata = {
   title: "Privacy Policy",
@@ -7,6 +8,11 @@ export const metadata: Metadata = {
   alternates: { canonical: "/privacy" },
 };
 
-export default function PrivacyPage() {
+export default async function PrivacyPage() {
+  if (isSelfHostedMode()) {
+    redirect("/");
+  }
+
+  const { PrivacyPageView } = await import("@/components/marketing/privacy-page-view");
   return <PrivacyPageView />;
 }

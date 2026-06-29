@@ -12,6 +12,7 @@ import {
 } from "@/lib/creed-data";
 import { findUserIdByProposalToken, loadCreedState, recordConnectionUsage } from "@/lib/creed-backend";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { isSelfHostedOwner } from "@/lib/deployment-mode";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { isSupabaseAdminConfigured } from "@/lib/supabase/env";
 
@@ -60,6 +61,12 @@ export async function POST(request: Request) {
   const { data: userData, error: userError } = await admin.auth.admin.getUserById(userId);
   if (userError || !userData.user) {
     return NextResponse.json({ error: userError?.message ?? "Could not load token owner." }, { status: 500 });
+  }
+  if (!isSelfHostedOwner(userData.user)) {
+    return NextResponse.json(
+      { error: "This self-hosted instance is limited to the owner account." },
+      { status: 403 }
+    );
   }
 
   // Proposals route only validates against sections + tokens. Skip pulling

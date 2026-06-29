@@ -1,13 +1,6 @@
 import type { Metadata } from "next";
-import { ContextFilePageView } from "@/components/marketing/context-file-page-view";
-import { JsonLd } from "@/components/marketing/json-ld";
-import { contextFileFaqItems } from "@/lib/marketing/faq";
-import {
-  breadcrumbSchema,
-  faqPageSchema,
-  graph,
-  webPageSchema,
-} from "@/lib/seo/structured-data";
+import { redirect } from "next/navigation";
+import { isSelfHostedMode } from "@/lib/deployment-mode";
 
 const PATH = "/context";
 const TITLE = "What is a context file?";
@@ -26,7 +19,21 @@ export const metadata: Metadata = {
   },
 };
 
-export default function ContextFilePage() {
+export default async function ContextFilePage() {
+  if (isSelfHostedMode()) {
+    redirect("/");
+  }
+
+  const { ContextFilePageView } = await import("@/components/marketing/context-file-page-view");
+  const { JsonLd } = await import("@/components/marketing/json-ld");
+  const { contextFileFaqItems } = await import("@/lib/marketing/faq");
+  const {
+    breadcrumbSchema,
+    faqPageSchema,
+    graph,
+    webPageSchema,
+  } = await import("@/lib/seo/structured-data");
+
   return (
     <>
       <JsonLd

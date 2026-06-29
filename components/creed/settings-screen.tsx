@@ -2,7 +2,9 @@
 
 import {
   useEffect,
+  lazy,
   useMemo,
+  Suspense,
   useState,
   type ComponentType,
   type ReactNode,
@@ -83,8 +85,6 @@ import {
   type RepoOption,
   type VersionControlStatus,
 } from "@/components/creed/settings-preload";
-import { AddCreditsDialog } from "@/components/creed/add-credits-dialog";
-import { CreditsHistoryDialog } from "@/components/creed/credits-history-dialog";
 import { LOW_ALLOWANCE_RATIO } from "@/lib/ai/credit-config";
 import { AI_FEATURES, featureMeta } from "@/lib/ai/features";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -97,6 +97,18 @@ import { cn } from "@/lib/utils";
 import { RichTextEditor } from "@/components/creed/rich-text-editor";
 
 const GITHUB_CONNECTED_EVENT = "creed:github-connected";
+
+const AddCreditsDialog = lazy(() =>
+  import("@/components/creed/add-credits-dialog").then((module) => ({
+    default: module.AddCreditsDialog,
+  }))
+);
+
+const CreditsHistoryDialog = lazy(() =>
+  import("@/components/creed/credits-history-dialog").then((module) => ({
+    default: module.CreditsHistoryDialog,
+  }))
+);
 
 function looksLikeApiKey(value: string) {
   const trimmed = value.trim();
@@ -210,7 +222,8 @@ export function SettingsScreen() {
   const [aiSettings, setAiSettings] = useState<PublicAiSettings>({
     provider: "openrouter",
     keyStatus: "missing",
-    aiMode: "credits",
+    aiMode: "byok",
+    selfHosted: false,
   });
   const [aiKeyDraft, setAiKeyDraft] = useState("");
   const [aiSaving, setAiSaving] = useState(false);
@@ -223,6 +236,8 @@ export function SettingsScreen() {
   const [addCreditsOpen, setAddCreditsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const canSaveAiKey = looksLikeApiKey(aiKeyDraft) && !aiSaving;
+  const selfHostedAi = aiSettings.selfHosted === true;
+  const aiModeOptions: AiMode[] = selfHostedAi ? ["byok"] : ["credits", "byok"];
 
   // Two-bucket credits display: the allowance as spent / total, a separate
   // roll-over "extra credits" card beneath it, and a quiet "low" nudge once the
@@ -423,6 +438,11 @@ export function SettingsScreen() {
     let cancelled = false;
 
     async function loadCredits() {
+      if (selfHostedAi || aiSettings.aiMode !== "credits") {
+        setCredits(null);
+        return;
+      }
+
       try {
         const next = await loadSettingsCredits();
         if (!cancelled) {
@@ -438,7 +458,7 @@ export function SettingsScreen() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [aiSettings.aiMode, selfHostedAi]);
 
   // The BYOK card shows the user's live OpenRouter balance, but only when a
   // valid key is saved. Clears in credits mode or when the key is gone.
@@ -773,6 +793,10 @@ export function SettingsScreen() {
   }
 
   async function handleModeChange(mode: AiMode) {
+    if (selfHostedAi && mode === "credits") {
+      toast.error("Credits mode is disabled on self-hosted deployments");
+      return;
+    }
     if (aiSettings.aiMode === mode) {
       return;
     }
@@ -802,6 +826,9 @@ export function SettingsScreen() {
   }
 
   async function refreshCredits() {
+    if (selfHostedAi) {
+      return;
+    }
     clearSettingsCreditsCache();
     try {
       setCredits(await loadSettingsCredits());
@@ -1020,7 +1047,7 @@ export function SettingsScreen() {
           <section>
             <div className="flex items-center justify-between gap-4">
               <h2 className="text-[16px] font-medium text-[var(--creed-text-primary)]">
-                Model usage
+                {selfHostedAi ? "AI model" : "Credits and models"}
               </h2>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -1036,7 +1063,7 @@ export function SettingsScreen() {
                   align="end"
                   className="min-w-32 space-y-1 border-[var(--creed-border)] bg-[var(--creed-surface)] p-1.5"
                 >
-                  {(["credits", "byok"] as AiMode[]).map((mode) => (
+                  {aiModeOptions.map((mode) => (
                     <DropdownMenuItem
                       key={mode}
                       onSelect={() => void handleModeChange(mode)}
@@ -1198,18 +1225,22 @@ export function SettingsScreen() {
               </div>
             </div>
 
-            <AddCreditsDialog
-              open={addCreditsOpen}
-              onOpenChange={setAddCreditsOpen}
-              currentBalanceUsd={credits?.balanceUsd ?? 0}
-              onToppedUp={() => void refreshCredits()}
-            />
-            <CreditsHistoryDialog
-              open={historyOpen}
-              onOpenChange={setHistoryOpen}
-              transactions={credits?.transactions ?? []}
-              allowanceResets={allowanceResets}
-            />
+            {!selfHostedAi && aiSettings.aiMode === "credits" ? (
+              <Suspense fallback={null}>
+                <AddCreditsDialog
+                  open={addCreditsOpen}
+                  onOpenChange={setAddCreditsOpen}
+                  currentBalanceUsd={credits?.balanceUsd ?? 0}
+                  onToppedUp={() => void refreshCredits()}
+                />
+                <CreditsHistoryDialog
+                  open={historyOpen}
+                  onOpenChange={setHistoryOpen}
+                  transactions={credits?.transactions ?? []}
+                  allowanceResets={allowanceResets}
+                />
+              </Suspense>
+            ) : null}
           </section>
 
           <Separator className="my-10 bg-[var(--creed-border)]" />
@@ -2053,4 +2084,3 @@ function SectionPermissionControl({
     </div>
   );
 }
-

@@ -6,6 +6,7 @@ import { creditTopup } from "@/lib/ai/credits";
 import { revokeOAuthTokensForUser } from "@/lib/oauth";
 import { isChargeFullyRefunded } from "@/lib/stripe-refund";
 import { log } from "@/lib/observability";
+import { isSelfHostedMode } from "@/lib/deployment-mode";
 
 // Re-export so callers can keep importing the refund rule from the Stripe
 // module surface; the implementation lives in a dependency-free file so it
@@ -137,7 +138,7 @@ export function getStripeWebhookSecret(): string | null {
 }
 
 export function isSelfHostedAccessEnabled(): boolean {
-  return process.env.CREED_SELF_HOSTED === "1";
+  return isSelfHostedMode();
 }
 
 /**

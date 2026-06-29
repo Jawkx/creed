@@ -34,6 +34,7 @@ export type PublicAiSettings = {
   provider: "openrouter";
   keyStatus: "missing" | "valid" | "invalid";
   aiMode: AiMode;
+  selfHosted: boolean;
   keyLastFour?: string;
   lastValidatedAt?: string;
 };
@@ -320,9 +321,15 @@ export function preloadSettingsData({
     setSettingsCacheScope(scope);
   }
 
-  void loadSettingsAiSettings().catch(() => null);
-  void loadSettingsUsage("90d", "credits").catch(() => null);
-  void loadSettingsCredits().catch(() => null);
+  void loadSettingsAiSettings()
+    .then((settings) => {
+      const mode = settings?.aiMode ?? "credits";
+      void loadSettingsUsage("90d", mode).catch(() => null);
+      if (!settings?.selfHosted && mode === "credits") {
+        void loadSettingsCredits().catch(() => null);
+      }
+    })
+    .catch(() => null);
   // The OpenRouter balance is only shown for a valid BYOK key (the minority
   // path), so the settings screen fetches it lazily on demand rather than
   // eagerly here where it would be a wasted call for every credits-mode user.

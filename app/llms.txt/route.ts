@@ -1,3 +1,4 @@
+import { isSelfHostedMode } from "@/lib/deployment-mode";
 import { getSiteUrl } from "@/lib/supabase/env";
 
 // Serves /llms.txt - the emerging convention that gives AI crawlers a clean,
@@ -7,6 +8,22 @@ export const dynamic = "force-static";
 
 export function GET() {
   const base = getSiteUrl().replace(/\/$/, "");
+
+  if (isSelfHostedMode()) {
+    const body = `# Creed
+
+> This is a private self-hosted Creed instance.
+
+The public marketing and documentation pages are disabled on this deployment. Authorized agents should connect through ${base}/mcp.
+`;
+
+    return new Response(body, {
+      headers: {
+        "content-type": "text/plain; charset=utf-8",
+        "cache-control": "private, no-store",
+      },
+    });
+  }
 
   const body = `# Creed
 

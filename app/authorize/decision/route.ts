@@ -6,6 +6,7 @@ import {
   isAllowedRedirectUri,
   issueAuthorizationCode,
 } from "@/lib/oauth";
+import { isSelfHostedOwner } from "@/lib/deployment-mode";
 import { hasActiveEntitlement } from "@/lib/stripe";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -63,6 +64,10 @@ export async function POST(request: Request) {
     // again rather than leaking anything to the redirect URI. 303 so the POST
     // becomes a GET.
     return NextResponse.redirect(new URL("/", request.url).toString(), 303);
+  }
+
+  if (!isSelfHostedOwner(user)) {
+    return badRequest("This self-hosted instance is limited to the owner account.");
   }
 
   if (decision !== "allow") {
