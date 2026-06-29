@@ -669,34 +669,14 @@ export type CreedSettings = {
 };
 
 export type OnboardingState = {
-  // Slimmed to four vibes; vibe only re-tunes question wording / tag picker /
-  // examples, never the section structure.
-  creedType: "personal" | "builder" | "creative" | "custom";
-
-  // Identity (always emits)
-  role: string;
-  workingWithYou: string;
-
-  // Goals (always emits)
-  currentProject: string;
-
-  // Work (always emits)
-  work: string;
-  stackSelections: Record<string, string[]>;
-  customStack: string[];
-
-  // Preferences (always emits)
-  responseStyle: "" | "Concise" | "Balanced" | "Thorough";
-  communicationStyle: Array<"Direct" | "Collaborative" | "Thorough" | "Concise">;
-  annoyances: string;
-
-  // Optional sections (compile only emits when the value is non-empty)
-  beliefs: string;
-  constraints: string;
-  people: string;
-  health: string;
-  routines: string;
-  context: string;
+  // Three open answers. The vibe picker and per-field forms were removed: the
+  // questions are now open prose that compile into the core seed spine
+  // (Identity, Goals, Work, Preferences, Routines). The user's own assistant
+  // fleshes the rest off the copy-paste compose prompt, and optional sections
+  // grow in-app via proposals. This object is client-only and never persisted.
+  identity: string; // who they are, what they do, the tools they live in
+  goals: string; // what they are working toward
+  preferences: string; // how AI should treat them, always / never
 };
 
 export type CreedState = {
@@ -739,22 +719,9 @@ export type CreedState = {
 };
 
 export const initialOnboardingState: OnboardingState = {
-  creedType: "personal",
-  role: "",
-  workingWithYou: "",
-  currentProject: "",
-  work: "",
-  stackSelections: {},
-  customStack: [],
-  responseStyle: "Balanced",
-  communicationStyle: [],
-  annoyances: "",
-  beliefs: "",
-  constraints: "",
-  people: "",
-  health: "",
-  routines: "",
-  context: "",
+  identity: "",
+  goals: "",
+  preferences: "",
 };
 
 export const accentColorMap: Record<AccentKey, string> = {
