@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { entitlementGrantsAccess } from "@/lib/stripe";
+import { entitlementGrantsAccess, isSelfHostedAccessEnabled } from "@/lib/stripe";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 
@@ -44,6 +44,16 @@ const NO_ACCESS: StatusPayload = {
   cancelAtPeriodEnd: false,
 };
 
+const SELF_HOSTED_ACCESS: StatusPayload = {
+  paid: true,
+  plan: "personal",
+  billingMode: "self-hosted",
+  interval: null,
+  status: "active",
+  currentPeriodEnd: null,
+  cancelAtPeriodEnd: false,
+};
+
 export async function GET() {
   if (!isSupabaseConfigured()) {
     return NextResponse.json(NO_ACCESS, { headers: NO_STORE_HEADERS });
@@ -56,6 +66,10 @@ export async function GET() {
 
   if (!user) {
     return NextResponse.json(NO_ACCESS, { headers: NO_STORE_HEADERS });
+  }
+
+  if (isSelfHostedAccessEnabled()) {
+    return NextResponse.json(SELF_HOSTED_ACCESS, { headers: NO_STORE_HEADERS });
   }
 
   // Ownership is decided from the always-present columns (billing_mode + status),

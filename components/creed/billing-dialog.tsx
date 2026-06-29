@@ -6,6 +6,7 @@
 //   lifetime owner → "You own Creed" - nothing to manage.
 //   subscriber     → renewal/cancel summary, "Manage billing" (Stripe portal),
 //                    and "Own it for life" (upgrade-to-own checkout).
+//   self-hosted    → local deployment notice, no Stripe controls.
 //   no plan        → link out to pricing (shouldn't happen inside the gated
 //                    app, but handled so the dialog never dead-ends).
 
@@ -94,6 +95,7 @@ export function BillingDialog({ open, onOpenChange }: BillingDialogProps) {
 
   const isLifetime = status?.billingMode === "lifetime" && status.paid;
   const isSubscriber = status?.billingMode === "subscription" && status.paid;
+  const isSelfHosted = status?.billingMode === "self-hosted" && status.paid;
   const renewalDate = formatDate(status?.currentPeriodEnd ?? null);
   // Monthly and yearly both come back as billingMode "subscription"; the
   // interval is the only discriminator. Default to monthly for legacy rows
@@ -110,13 +112,27 @@ export function BillingDialog({ open, onOpenChange }: BillingDialogProps) {
               ? "You own Creed."
               : isSubscriber
                 ? `${planLabel(status?.plan ?? null)} plan, billed ${cadenceWord}.`
-                : "Manage your Creed plan."}
+                : isSelfHosted
+                  ? "Self-hosted access is enabled."
+                  : "Manage your Creed plan."}
           </DialogDescription>
         </DialogHeader>
 
         {loading ? (
           <div className="flex items-center justify-center py-10 text-[var(--creed-text-tertiary)]">
             <LoaderCircle className="h-5 w-5 animate-spin" />
+          </div>
+        ) : isSelfHosted ? (
+          <div className="space-y-4 py-2">
+            <div className="rounded-[12px] border border-[var(--creed-border)] bg-[var(--creed-surface-raised)] p-4">
+              <div className="text-[14px] font-medium text-[var(--creed-text-primary)]">
+                Self-hosted
+              </div>
+              <p className="mt-1 text-[13px] leading-6 text-[var(--creed-text-secondary)]">
+                This deployment grants access with CREED_SELF_HOSTED. There&apos;s
+                no Stripe billing to manage.
+              </p>
+            </div>
           </div>
         ) : isLifetime ? (
           <div className="space-y-4 py-2">

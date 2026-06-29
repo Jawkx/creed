@@ -146,6 +146,8 @@ Open [http://localhost:3000](http://localhost:3000). Sign in with Google and you
 
 If you're standing up a separate hosted Creed (not contributing back to this repo):
 
+- Read the full self-hosting checklist in [`docs/self-hosting.md`](./docs/self-hosting.md).
+- For a private deployment without Stripe, set `CREED_SELF_HOSTED=1` so signed-in users get app access without an entitlement row.
 - Set `NEXT_PUBLIC_SITE_URL` to your deployed origin so OAuth callback and Stripe redirect URLs resolve correctly.
 - Set `CREED_CSP_ENFORCE=1` in production once you've watched one deploy cycle in Report-Only mode.
 - The Stripe webhook signing secret in production differs from your local `whsec_…` — create a webhook endpoint in the live Stripe dashboard pointing at `https://<your-domain>/api/stripe/webhook` and use that secret.

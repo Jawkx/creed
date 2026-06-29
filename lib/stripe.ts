@@ -136,6 +136,10 @@ export function getStripeWebhookSecret(): string | null {
   return process.env.STRIPE_WEBHOOK_SECRET?.trim() || null;
 }
 
+export function isSelfHostedAccessEnabled(): boolean {
+  return process.env.CREED_SELF_HOSTED === "1";
+}
+
 /**
  * Verify a Stripe webhook request and return the parsed event. Throws if
  * the signature is missing, malformed, or doesn't match the configured
@@ -273,6 +277,10 @@ export async function hasActiveEntitlement(
   client: unknown,
   userId: string
 ): Promise<boolean> {
+  if (isSelfHostedAccessEnabled()) {
+    return true;
+  }
+
   const db = client as SupabaseLikeClient;
   const { data, error } = (await db
     .from("creed_entitlements")
